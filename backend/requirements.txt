@@ -1,0 +1,41 @@
+﻿# ── PHASE 1: Core API (install these now) ────────────────────────────────────
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+python-dotenv==1.0.1
+pydantic==2.7.1
+
+# ── PHASE 1: Database ─────────────────────────────────────────────────────────
+sqlalchemy==2.0.30
+asyncpg==0.29.0
+alembic==1.13.1
+
+# ── PHASE 1: Auth ─────────────────────────────────────────────────────────────
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+
+# ── PHASE 2: Video Ingestion ──────────────────────────────────────────────────
+opencv-python-headless==4.9.0.80
+numpy==1.26.4
+
+# ── PHASE 3: Object Detection & Tracking ─────────────────────────────────────
+# ultralytics==8.2.0
+# lap==0.4.0
+# bytetracker==0.0.5
+
+# ── PHASE 5: Face Recognition ─────────────────────────────────────────────────
+# insightface==0.7.3
+# faiss-cpu==1.8.0
+# onnxruntime==1.18.0
+
+# ── PHASE 6: Real-time Alerts ─────────────────────────────────────────────────
+redis[asyncio]==5.0.4
+
+# ── PHASE 7: File Handling & Reports ─────────────────────────────────────────
+python-multipart==0.0.9
+aiofiles==23.2.1
+# reportlab==4.2.0
+
+# ── TESTING ───────────────────────────────────────────────────────────────────
+pytest==8.2.0
+pytest-asyncio==0.23.6
+httpx==0.27.0
