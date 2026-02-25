@@ -1,7 +1,7 @@
 ﻿"""
 OVERWATCH - Backend Entry Point
 ================================
-Start here. Everything lives in this file until the codebase demands splitting.
+Start here.Everything lives in this file until the codebase demands splitting.
 
 Run:
     uvicorn app:app --reload --port 8000
