@@ -44,8 +44,8 @@ class Settings(BaseSettings):
     detection_device: str = "cpu"
 
     # ── Detection Classes ────────────────────────────────────────
-    # COCO class IDs to detect (0=person, default person-only)
-    detection_classes: list[int] = [0]
+    # COCO class IDs to detect (0=person, 2=car, 56=chair, 39=bottle, 63=laptop, 67=cell phone)
+    detection_classes: list[int] = [0, 2, 39, 56, 63, 67]
 
     # ── Streaming ────────────────────────────────────────────────
     stream_quality: int = 80  # JPEG encode quality (1-100)

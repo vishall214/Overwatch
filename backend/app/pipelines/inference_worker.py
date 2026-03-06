@@ -173,6 +173,10 @@ class InferenceWorker:
                         alpha * inference_ms + (1 - alpha) * self._avg_inference_ms
                     )
 
+                # Log detections for debugging (Test 3)
+                for d in result.detections:
+                    logger.info("Detected: %s (%.2f)", d.class_name, d.confidence)
+
                 # Serialize detections for the packet
                 detection_dicts = [d.to_dict() for d in result.detections]
 
