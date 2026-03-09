@@ -118,8 +118,8 @@ class CaptureWorker:
 
                 frame_index += 1
 
-                # Frame skipping: only process every (skip_count + 1)th frame
-                if skip_count > 0 and (frame_index % (skip_count + 1)) != 0:
+                # Frame skipping: only process every (skip_count)th frame
+                if skip_count > 1 and (frame_index % skip_count) != 0:
                     continue
 
                 packet = FramePacket(
