@@ -9,7 +9,7 @@ Designed to run in a dedicated thread so JPEG encoding
 does not block inference or the asyncio event loop.
 
 Architecture:
-    detection_queue → cv2.imencode → stream_queue → MJPEG endpoint
+    tracking_queue → cv2.imencode → stream_queue → MJPEG endpoint
 """
 
 import logging
@@ -21,7 +21,7 @@ from typing import Optional
 import cv2
 
 from app.config import Settings
-from app.core.queues import PipelineQueues, DetectionPacket
+from app.core.queues import PipelineQueues, TrackingPacket
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ class StreamWorker:
     """
     Encodes annotated frames as JPEG in a background thread.
 
-    Reads DetectionPackets from the detection queue, encodes the
+    Reads TrackingPackets from the tracking queue, encodes the
     annotated frame using OpenCV imencode, and pushes the resulting
     bytes into the stream queue for the MJPEG endpoint to consume.
 
@@ -97,7 +97,7 @@ class StreamWorker:
         """
         Main encoding loop running in a background thread.
 
-        Pulls DetectionPackets from the detection queue, encodes the
+        Pulls TrackingPackets from the tracking queue, encodes the
         annotated frame as JPEG, and pushes the bytes into the stream
         queue.  Drops results if the stream queue is full to keep only
         the freshest frame available for viewers.
@@ -110,7 +110,7 @@ class StreamWorker:
             try:
                 # Block with timeout to allow shutdown check
                 try:
-                    packet: DetectionPacket = self._queues.detection_queue.get(
+                    packet: TrackingPacket = self._queues.tracking_queue.get(
                         timeout=0.1,
                     )
                 except queue.Empty:

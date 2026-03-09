@@ -15,7 +15,8 @@ python-multipart==0.0.9
 aiofiles==23.2.1
 
 # ── PHASE 2: Tracking ────────────────────────────────────────────────────────
-# lap==0.4.0
+supervision>=0.18.0
+lapx>=0.5.0
 
 # ── PHASE 3: Database + Storage ───────────────────────────────────────────────
 # sqlalchemy==2.0.30

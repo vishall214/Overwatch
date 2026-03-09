@@ -58,6 +58,26 @@ class DetectionPacket:
     timestamp_ns: int
 
 
+@dataclass
+class TrackingPacket:
+    """
+    Data packet passed through the tracking queue.
+
+    Attributes:
+        frame: Original BGR frame.
+        annotated_frame: Frame with tracking bounding boxes drawn.
+        tracked_objects: List of tracked object dictionaries.
+        frame_index: Sequential frame counter.
+        timestamp_ns: Original capture timestamp in nanoseconds.
+    """
+
+    frame: np.ndarray
+    annotated_frame: np.ndarray
+    tracked_objects: list[dict[str, Any]]
+    frame_index: int
+    timestamp_ns: int
+
+
 class PipelineQueues:
     """
     Container for all thread-safe queues used in the video pipeline.
@@ -68,7 +88,8 @@ class PipelineQueues:
 
     Attributes:
         frame_queue: Raw frames from capture worker → inference worker.
-        detection_queue: Detection results → stream worker.
+        detection_queue: Detection results → tracking worker.
+        tracking_queue: Tracked results → stream worker.
         stream_queue: Encoded JPEG bytes → MJPEG endpoint.
     """
 
@@ -78,15 +99,17 @@ class PipelineQueues:
 
         Sizes are tuned for low-latency CPU pipelines:
           - frame_queue(5):     absorbs capture/inference speed mismatch
-          - detection_queue(5): absorbs inference/encode speed mismatch
+          - detection_queue(5): absorbs inference/tracking speed mismatch
+          - tracking_queue(5):  absorbs tracking/encode speed mismatch
           - stream_queue(2):    keeps only the freshest frames for streaming
         """
         self.frame_queue: queue.Queue[FramePacket] = queue.Queue(maxsize=5)
         self.detection_queue: queue.Queue[DetectionPacket] = queue.Queue(maxsize=5)
+        self.tracking_queue: queue.Queue[TrackingPacket] = queue.Queue(maxsize=5)
         self.stream_queue: queue.Queue[bytes] = queue.Queue(maxsize=2)
 
         logger.info(
-            "Pipeline queues initialized (frame=5, detection=5, stream=2)",
+            "Pipeline queues initialized (frame=5, detection=5, tracking=5, stream=2)",
         )
 
     def clear_all(self) -> None:
@@ -98,6 +121,7 @@ class PipelineQueues:
         for q, name in [
             (self.frame_queue, "frame_queue"),
             (self.detection_queue, "detection_queue"),
+            (self.tracking_queue, "tracking_queue"),
             (self.stream_queue, "stream_queue"),
         ]:
             count = 0
@@ -121,5 +145,6 @@ class PipelineQueues:
         return {
             "frame_queue": self.frame_queue.qsize(),
             "detection_queue": self.detection_queue.qsize(),
+            "tracking_queue": self.tracking_queue.qsize(),
             "stream_queue": self.stream_queue.qsize(),
         }
