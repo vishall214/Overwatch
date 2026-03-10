@@ -23,9 +23,11 @@ from app.core.event_bus import EventBus, Event
 from app.core.queues import PipelineQueues
 from app.services.video_service import VideoService
 from app.services.detection_service import DetectionService
+from app.services.alert_service import AlertService
 from app.pipelines.capture_worker import CaptureWorker
 from app.pipelines.inference_worker import InferenceWorker
 from app.pipelines.tracking_worker import TrackingWorker
+from app.pipelines.behavior_worker import BehaviorWorker
 from app.pipelines.stream_worker import StreamWorker
 
 logger = logging.getLogger(__name__)
@@ -35,7 +37,7 @@ class VideoPipeline:
     """
     Orchestrates the video processing pipeline lifecycle.
 
-    Manages four background worker threads and the shared
+    Manages five background worker threads and the shared
     queue infrastructure.  Exposes start/stop/status for the
     camera API routes.
 
@@ -48,6 +50,7 @@ class VideoPipeline:
         _capture_worker: Background frame-capture thread.
         _inference_worker: Background YOLOv8 inference thread.
         _tracking_worker: Background ByteTrack tracking thread.
+        _behavior_worker: Background behavior analysis thread.
         _stream_worker: Background JPEG-encoding thread.
         _is_running: Whether the pipeline is actively processing.
     """
@@ -59,6 +62,7 @@ class VideoPipeline:
         video_service: VideoService,
         detection_service: DetectionService,
         queues: PipelineQueues,
+        alert_service: Optional[AlertService] = None,
     ) -> None:
         """
         Initialize the VideoPipeline.
@@ -69,16 +73,19 @@ class VideoPipeline:
             video_service: Service for capturing video frames.
             detection_service: Service for running object detection.
             queues: Thread-safe inter-worker queues.
+            alert_service: Optional alert service for behavior alerts.
         """
         self._settings: Settings = settings
         self._event_bus: EventBus = event_bus
         self._video_service: VideoService = video_service
         self._detection_service: DetectionService = detection_service
         self._queues: PipelineQueues = queues
+        self._alert_service: Optional[AlertService] = alert_service
 
         self._capture_worker: Optional[CaptureWorker] = None
         self._inference_worker: Optional[InferenceWorker] = None
         self._tracking_worker: Optional[TrackingWorker] = None
+        self._behavior_worker: Optional[BehaviorWorker] = None
         self._stream_worker: Optional[StreamWorker] = None
 
         self._is_running: bool = False
@@ -139,6 +146,12 @@ class VideoPipeline:
             settings=self._settings,
             queues=self._queues,
         )
+        self._behavior_worker = BehaviorWorker(
+            settings=self._settings,
+            queues=self._queues,
+            event_bus=self._event_bus,
+            alert_service=self._alert_service,
+        )
         self._stream_worker = StreamWorker(
             settings=self._settings,
             queues=self._queues,
@@ -148,6 +161,7 @@ class VideoPipeline:
         self._capture_worker.start()
         self._inference_worker.start()
         self._tracking_worker.start()
+        self._behavior_worker.start()
         self._stream_worker.start()
 
         self._is_running = True
@@ -157,7 +171,7 @@ class VideoPipeline:
             data={"source": source or self._settings.video_source},
         ))
 
-        logger.info("Video pipeline started (4 workers)")
+        logger.info("Video pipeline started (5 workers)")
         return True
 
     async def stop(self) -> None:
@@ -177,6 +191,8 @@ class VideoPipeline:
         # Stop workers in reverse order (thread.join → executor)
         if self._stream_worker is not None:
             await loop.run_in_executor(None, self._stream_worker.stop)
+        if self._behavior_worker is not None:
+            await loop.run_in_executor(None, self._behavior_worker.stop)
         if self._tracking_worker is not None:
             await loop.run_in_executor(None, self._tracking_worker.stop)
         if self._inference_worker is not None:
@@ -227,6 +243,10 @@ class VideoPipeline:
             "is_running": False,
             "frames_tracked": 0,
         }
+        behavior_stats = {
+            "is_running": False,
+            "frames_analyzed": 0,
+        }
         stream_stats = {
             "is_running": False,
             "frames_encoded": 0,
@@ -247,6 +267,12 @@ class VideoPipeline:
                 "frames_tracked": self._tracking_worker.track_count,
             }
 
+        if self._behavior_worker is not None:
+            behavior_stats = {
+                "is_running": self._behavior_worker.is_running,
+                "frames_analyzed": self._behavior_worker.analyze_count,
+            }
+
         if self._stream_worker is not None:
             stream_stats = {
                 "is_running": self._stream_worker.is_running,
@@ -260,6 +286,7 @@ class VideoPipeline:
             "capture_worker": capture_stats,
             "inference_worker": inference_stats,
             "tracking_worker": tracking_stats,
+            "behavior_worker": behavior_stats,
             "stream_worker": stream_stats,
             "queues": self._queues.stats,
         }

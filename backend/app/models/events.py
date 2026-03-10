@@ -268,6 +268,42 @@ class AlertEvent:
 
 
 @dataclass
+class Alert:
+    """
+    Represents a stored security alert generated from a behavior event.
+
+    Attributes:
+        id: Unique alert identifier.
+        event_type: Type of event (intrusion, loitering, crowd).
+        timestamp: UTC time when the alert was created.
+        track_id: ID of the tracked object that triggered the alert (if applicable).
+        zone: Zone identifier where the event occurred.
+        metadata: Additional context from the triggering event.
+        snapshot_path: Path to the saved snapshot image (if available).
+    """
+
+    id: int
+    event_type: str
+    timestamp: datetime
+    track_id: int | None = None
+    zone: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
+    snapshot_path: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a JSON-serializable dictionary."""
+        return {
+            "id": self.id,
+            "event_type": self.event_type,
+            "timestamp": self.timestamp.isoformat(),
+            "track_id": self.track_id,
+            "zone": self.zone,
+            "metadata": self.metadata,
+            "snapshot_path": self.snapshot_path,
+        }
+
+
+@dataclass
 class PipelineStartedEvent:
     """
     Published when the video processing pipeline starts.

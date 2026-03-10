@@ -21,7 +21,9 @@ from app.schemas.camera_schema import (
 )
 from app.services.video_service import VideoService
 from app.services.detection_service import DetectionService
+from app.services.alert_service import AlertService
 from app.pipelines.video_pipeline import VideoPipeline
+from app.api.routes_alerts import init_alert_routes
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +59,9 @@ def init_camera_services(
 
     video_service = VideoService(settings)
     detection_service = DetectionService(settings)
+    alert_service = AlertService(settings)
+
+    init_alert_routes(alert_service)
 
     _pipeline = VideoPipeline(
         settings=settings,
@@ -64,6 +69,7 @@ def init_camera_services(
         video_service=video_service,
         detection_service=detection_service,
         queues=queues,
+        alert_service=alert_service,
     )
 
     logger.info("Camera services initialized")

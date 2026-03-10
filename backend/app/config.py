@@ -62,6 +62,11 @@ class Settings(BaseSettings):
     pipeline_max_resolution: int = 640
     queue_size: int = 32  # Max items per inter-worker queue
 
+    # ── Behavior / Intrusion Zones ─────────────────────────────────
+    zone_a: list[list[int]] = [[200, 100], [400, 100], [400, 300], [200, 300]]
+    loiter_threshold: float = 10.0  # Seconds inside zone before loitering alert
+    crowd_threshold: int = 5  # Number of persons in zone before crowd alert
+
     model_config = {
         "env_prefix": "OVERWATCH_",
         "env_file": ".env",
