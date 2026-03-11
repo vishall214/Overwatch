@@ -25,6 +25,7 @@ from app.services.video_service import VideoService
 from app.services.detection_service import DetectionService
 from app.services.alert_service import AlertService
 from app.services.face.face_service import FaceService
+from app.services.module_controller import ModuleController
 from app.pipelines.capture_worker import CaptureWorker
 from app.pipelines.inference_worker import InferenceWorker
 from app.pipelines.tracking_worker import TrackingWorker
@@ -65,6 +66,7 @@ class VideoPipeline:
         queues: PipelineQueues,
         alert_service: Optional[AlertService] = None,
         face_service: Optional[FaceService] = None,
+        module_controller: Optional[ModuleController] = None,
     ) -> None:
         """
         Initialize the VideoPipeline.
@@ -77,6 +79,7 @@ class VideoPipeline:
             queues: Thread-safe inter-worker queues.
             alert_service: Optional alert service for behavior alerts.
             face_service: Optional face recognition service.
+            module_controller: Optional analytics module controller.
         """
         self._settings: Settings = settings
         self._event_bus: EventBus = event_bus
@@ -85,6 +88,7 @@ class VideoPipeline:
         self._queues: PipelineQueues = queues
         self._alert_service: Optional[AlertService] = alert_service
         self._face_service: Optional[FaceService] = face_service
+        self._module_controller: Optional[ModuleController] = module_controller
 
         self._capture_worker: Optional[CaptureWorker] = None
         self._inference_worker: Optional[InferenceWorker] = None
@@ -164,6 +168,7 @@ class VideoPipeline:
             event_bus=self._event_bus,
             alert_service=self._alert_service,
             face_service=self._face_service,
+            module_controller=self._module_controller,
         )
         self._stream_worker = StreamWorker(
             settings=self._settings,

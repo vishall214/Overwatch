@@ -24,6 +24,8 @@ from app.core.dependencies import get_cached_settings, get_event_bus, get_pipeli
 from app.api.routes_camera import router as camera_router, init_camera_services
 from app.api.routes_alerts import router as alerts_router
 from app.api.routes_faces import router as faces_router
+from app.api.routes_system import router as system_router
+from app.api.routes_monitoring import router as monitoring_router
 from app.database.database import engine
 from app.database.models import Base
 
@@ -104,7 +106,8 @@ def create_app() -> FastAPI:
     application.include_router(camera_router)
     application.include_router(alerts_router)
     application.include_router(faces_router)
-
+    application.include_router(system_router)
+    application.include_router(monitoring_router)
     # ── Health Check ─────────────────────────────────────────────
     @application.get("/health", tags=["System"])
     async def health() -> dict:

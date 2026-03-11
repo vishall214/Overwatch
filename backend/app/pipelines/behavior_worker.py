@@ -29,6 +29,7 @@ from app.core.event_bus import EventBus, Event
 from app.core.queues import PipelineQueues, TrackingPacket, BehaviorPacket
 from app.services.alert_service import AlertService
 from app.services.face.face_service import FaceService
+from app.services.module_controller import ModuleController
 from app.utils.geometry_utils import point_in_polygon, bbox_center
 
 logger = logging.getLogger(__name__)
@@ -69,12 +70,14 @@ class BehaviorWorker:
         event_bus: EventBus,
         alert_service: Optional[AlertService] = None,
         face_service: Optional[FaceService] = None,
+        module_controller: Optional[ModuleController] = None,
     ) -> None:
         self._settings: Settings = settings
         self._queues: PipelineQueues = queues
         self._event_bus: EventBus = event_bus
         self._alert_service: Optional[AlertService] = alert_service
         self._face_service: Optional[FaceService] = face_service
+        self._module_controller: Optional[ModuleController] = module_controller
         self._zone_polygon: list[tuple[float, float]] = [
             (float(p[0]), float(p[1])) for p in settings.zone_a
         ]
@@ -255,6 +258,14 @@ class BehaviorWorker:
                 now = time.monotonic()
                 current_track_ids: set[int] = set()
 
+                # Snapshot module states once per packet — plain dict read,
+                # zero-cost boolean checks inside the loop.
+                _mod = (
+                    self._module_controller.modules
+                    if self._module_controller is not None
+                    else {"intrusion": True, "loitering": True, "crowd": True}
+                )
+
                 # --- Check each tracked object against Zone A ----------
                 for obj in packet.tracked_objects:
                     bbox = obj["bbox"]
@@ -263,85 +274,95 @@ class BehaviorWorker:
                     current_track_ids.add(track_id)
 
                     if point_in_polygon(center, self._zone_polygon):
-                        # Count persons inside zone for crowd detection
+                        # Always count persons — needed for crowd detection
                         if obj.get("class_name", "unknown") == "person":
                             people_in_zone += 1
-                        intrusion_detected = True
 
-                        # Intrusion: publish on first entry
-                        if track_id not in self._active_intrusions:
-                            self._active_intrusions.add(track_id)
-                            event_data = {
-                                "track_id": track_id,
-                                "zone": "A",
-                                "class_name": obj.get("class_name", "unknown"),
-                                "bbox": bbox,
-                                "timestamp": datetime.now(timezone.utc).isoformat(),
-                            }
-                            behavior_events.append(event_data)
-                            self._publish_event(Event(
-                                type="IntrusionDetected",
-                                data=event_data,
-                            ))
-                            if self._alert_service is not None:
-                                self._alert_service.create_alert(
-                                    event_type="intrusion",
-                                    track_id=track_id,
-                                    zone="A",
-                                    metadata=event_data,
-                                    frame=packet.frame,
-                                )
-                            logger.warning(
-                                "INTRUSION: %s #%d entered Zone A",
-                                obj.get("class_name", "unknown"),
-                                track_id,
-                            )
-
-                        # Loitering: track time inside zone
-                        if track_id not in self._loiter_state:
-                            self._loiter_state[track_id] = now
-
-                        duration = now - self._loiter_state[track_id]
-                        loiter_timers[track_id] = duration
-
-                        if duration >= self._loiter_threshold:
-                            loitering_detected = True
-                            if track_id not in self._loiter_alerted:
-                                self._loiter_alerted.add(track_id)
-                                loiter_event = {
+                        # Intrusion detection (gated by module controller)
+                        if _mod["intrusion"]:
+                            intrusion_detected = True
+                            if track_id not in self._active_intrusions:
+                                self._active_intrusions.add(track_id)
+                                event_data = {
                                     "track_id": track_id,
-                                    "duration": round(duration, 1),
                                     "zone": "A",
                                     "class_name": obj.get("class_name", "unknown"),
+                                    "bbox": bbox,
                                     "timestamp": datetime.now(timezone.utc).isoformat(),
                                 }
-                                behavior_events.append(loiter_event)
+                                behavior_events.append(event_data)
                                 self._publish_event(Event(
-                                    type="LoiteringDetected",
-                                    data=loiter_event,
+                                    type="IntrusionDetected",
+                                    data=event_data,
                                 ))
                                 if self._alert_service is not None:
                                     self._alert_service.create_alert(
-                                        event_type="loitering",
+                                        event_type="intrusion",
                                         track_id=track_id,
                                         zone="A",
-                                        metadata=loiter_event,
+                                        metadata=event_data,
                                         frame=packet.frame,
                                     )
                                 logger.warning(
-                                    "LOITERING: %s #%d in Zone A for %.1fs",
+                                    "INTRUSION: %s #%d entered Zone A",
                                     obj.get("class_name", "unknown"),
                                     track_id,
-                                    duration,
                                 )
+                        else:
+                            # Module disabled — clear state so re-enable fires a fresh alert
+                            self._active_intrusions.discard(track_id)
+
+                        # Loitering detection (gated by module controller)
+                        if _mod["loitering"]:
+                            if track_id not in self._loiter_state:
+                                self._loiter_state[track_id] = now
+
+                            duration = now - self._loiter_state[track_id]
+                            loiter_timers[track_id] = duration
+
+                            if duration >= self._loiter_threshold:
+                                loitering_detected = True
+                                if track_id not in self._loiter_alerted:
+                                    self._loiter_alerted.add(track_id)
+                                    loiter_event = {
+                                        "track_id": track_id,
+                                        "duration": round(duration, 1),
+                                        "zone": "A",
+                                        "class_name": obj.get("class_name", "unknown"),
+                                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                                    }
+                                    behavior_events.append(loiter_event)
+                                    self._publish_event(Event(
+                                        type="LoiteringDetected",
+                                        data=loiter_event,
+                                    ))
+                                    if self._alert_service is not None:
+                                        self._alert_service.create_alert(
+                                            event_type="loitering",
+                                            track_id=track_id,
+                                            zone="A",
+                                            metadata=loiter_event,
+                                            frame=packet.frame,
+                                        )
+                                    logger.warning(
+                                        "LOITERING: %s #%d in Zone A for %.1fs",
+                                        obj.get("class_name", "unknown"),
+                                        track_id,
+                                        duration,
+                                    )
+                        else:
+                            # Module disabled — reset timer so re-enable starts fresh
+                            self._loiter_state.pop(track_id, None)
+                            self._loiter_alerted.discard(track_id)
+
                     else:
                         # Object left the zone
                         self._active_intrusions.discard(track_id)
                         self._loiter_state.pop(track_id, None)
                         self._loiter_alerted.discard(track_id)
 
-                # --- Crowd detection -----------------------------------
-                if people_in_zone > self._crowd_threshold:
+                # --- Crowd detection (gated by module controller) ------
+                if _mod["crowd"] and people_in_zone > self._crowd_threshold:
                     crowd_detected = True
                     if not self._crowd_alerted:
                         self._crowd_alerted = True

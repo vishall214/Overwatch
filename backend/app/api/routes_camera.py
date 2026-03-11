@@ -26,6 +26,8 @@ from app.services.face.face_service import FaceService
 from app.pipelines.video_pipeline import VideoPipeline
 from app.api.routes_alerts import init_alert_routes
 from app.api.routes_faces import init_face_routes
+from app.api.routes_system import init_system_routes
+from app.core.dependencies import get_module_controller, get_system_monitor
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +64,7 @@ def init_camera_services(
     video_service = VideoService(settings)
     detection_service = DetectionService(settings)
     alert_service = AlertService(settings)
+    module_controller = get_module_controller()
     # FaceService() is always created so DB endpoints (list/delete) remain
     # functional.  InsightFace models are NOT loaded here — load_model() is
     # only called inside VideoPipeline.start() when face_service is non-None.
@@ -83,7 +86,14 @@ def init_camera_services(
         queues=queues,
         alert_service=alert_service,
         face_service=pipeline_face_service,
+        module_controller=module_controller,
     )
+
+    # Wire up the SystemMonitor with all required references
+    system_monitor = get_system_monitor()
+    system_monitor.set_pipeline(_pipeline)
+    system_monitor.set_module_controller(module_controller)
+    init_system_routes(module_controller, _pipeline, system_monitor)
 
     logger.info("Camera services initialized")
     return _pipeline
