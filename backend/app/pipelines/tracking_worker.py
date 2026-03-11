@@ -78,6 +78,9 @@ class TrackingWorker:
         self._thread: Optional[threading.Thread] = None
         self._is_running: bool = False
         self._track_count: int = 0
+        self._drop_count: int = 0
+        self._avg_tracking_ms: float = 0.0
+        self._avg_input_age_ms: float = 0.0
 
     def start(self) -> None:
         """Start the tracking worker in a background thread."""
@@ -87,6 +90,9 @@ class TrackingWorker:
 
         self._is_running = True
         self._track_count = 0
+        self._drop_count = 0
+        self._avg_tracking_ms = 0.0
+        self._avg_input_age_ms = 0.0
         self._tracker.reset()
         self._thread = threading.Thread(
             target=self._tracking_loop,
@@ -126,6 +132,9 @@ class TrackingWorker:
                     )
                 except queue.Empty:
                     continue
+
+                start_time = time.monotonic()
+                input_age_ms = (time.monotonic_ns() - packet.timestamp_ns) / 1_000_000
 
                 # --- Convert detections to supervision format -----------
                 detections_list = packet.detections
@@ -179,6 +188,19 @@ class TrackingWorker:
                 )
 
                 tracked_dicts = [t.to_dict() for t in tracked_objects]
+                tracking_time_ms = (time.monotonic() - start_time) * 1000
+                self._track_count += 1
+                alpha = 0.1
+                if self._track_count == 1:
+                    self._avg_tracking_ms = tracking_time_ms
+                    self._avg_input_age_ms = input_age_ms
+                else:
+                    self._avg_tracking_ms = (
+                        alpha * tracking_time_ms + (1 - alpha) * self._avg_tracking_ms
+                    )
+                    self._avg_input_age_ms = (
+                        alpha * input_age_ms + (1 - alpha) * self._avg_input_age_ms
+                    )
 
                 tracking_packet = TrackingPacket(
                     frame=packet.frame,
@@ -186,15 +208,32 @@ class TrackingWorker:
                     tracked_objects=tracked_dicts,
                     frame_index=packet.frame_index,
                     timestamp_ns=packet.timestamp_ns,
+                    capture_time_ms=packet.capture_time_ms,
+                    inference_time_ms=packet.inference_time_ms,
+                    tracking_time_ms=round(tracking_time_ms, 1),
                 )
 
                 try:
                     self._queues.tracking_queue.put_nowait(tracking_packet)
-                    self._track_count += 1
                 except queue.Full:
+                    self._drop_count += 1
+                    try:
+                        self._queues.tracking_queue.get_nowait()
+                    except queue.Empty:
+                        pass
+                    self._queues.tracking_queue.put_nowait(tracking_packet)
                     logger.debug(
-                        "Tracking queue full, dropping result for frame %d",
+                        "Tracking queue full, replaced oldest with frame %d",
                         packet.frame_index,
+                    )
+
+                if self._track_count % 30 == 0:
+                    logger.info(
+                        "perf tracking frame=%d input_age_ms=%.1f tracking_time_ms=%.1f tracking_queue=%d",
+                        packet.frame_index,
+                        input_age_ms,
+                        tracking_time_ms,
+                        self._queues.tracking_queue.qsize(),
                     )
 
             except Exception:
@@ -260,3 +299,14 @@ class TrackingWorker:
     def track_count(self) -> int:
         """Return the number of frames tracked."""
         return self._track_count
+
+    @property
+    def stats(self) -> dict:
+        """Return tracking worker statistics."""
+        return {
+            "is_running": self._is_running,
+            "frames_tracked": self._track_count,
+            "avg_tracking_ms": round(self._avg_tracking_ms, 1),
+            "avg_input_age_ms": round(self._avg_input_age_ms, 1),
+            "frames_dropped": self._drop_count,
+        }

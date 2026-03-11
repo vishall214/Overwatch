@@ -112,14 +112,11 @@ class DetectionService:
                 )
                 detections.append(detection)
 
-        # Get annotated frame with bounding boxes drawn by YOLO
-        annotated_frame = result.plot()
-
         logger.debug("Detected %d objects", len(detections))
 
         return DetectionResult(
             detections=detections,
-            annotated_frame=annotated_frame,
+            annotated_frame=frame,
         )
 
     @property

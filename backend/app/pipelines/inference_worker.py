@@ -73,6 +73,10 @@ class InferenceWorker:
         self._is_running: bool = False
         self._inference_count: int = 0
         self._avg_inference_ms: float = 0.0
+        self._frame_skip_counter: int = 0
+        self._skip_frames: int = 3
+        self._drop_count: int = 0
+        self._avg_input_age_ms: float = 0.0
 
     def start(self) -> None:
         """
@@ -97,6 +101,9 @@ class InferenceWorker:
         self._is_running = True
         self._inference_count = 0
         self._avg_inference_ms = 0.0
+        self._frame_skip_counter = 0
+        self._drop_count = 0
+        self._avg_input_age_ms = 0.0
         self._thread = threading.Thread(
             target=self._inference_loop,
             name="InferenceWorker",
@@ -158,6 +165,20 @@ class InferenceWorker:
                 except queue.Empty:
                     continue
 
+                # Always prefer the newest captured frame to avoid stale inference.
+                while True:
+                    try:
+                        packet = self._queues.frame_queue.get_nowait()
+                    except queue.Empty:
+                        break
+
+                # Skip frames to reduce detection load
+                self._frame_skip_counter += 1
+                if self._frame_skip_counter % self._skip_frames != 0:
+                    continue
+
+                input_age_ms = (time.monotonic_ns() - packet.timestamp_ns) / 1_000_000
+
                 # Run detection
                 start_time = time.monotonic()
                 result = self._detection_service.detect(packet.frame)
@@ -168,14 +189,19 @@ class InferenceWorker:
                 alpha = 0.1  # Exponential moving average factor
                 if self._inference_count == 1:
                     self._avg_inference_ms = inference_ms
+                    self._avg_input_age_ms = input_age_ms
                 else:
                     self._avg_inference_ms = (
                         alpha * inference_ms + (1 - alpha) * self._avg_inference_ms
                     )
+                    self._avg_input_age_ms = (
+                        alpha * input_age_ms + (1 - alpha) * self._avg_input_age_ms
+                    )
 
-                # Log detections for debugging (Test 3)
-                for d in result.detections:
-                    logger.info("Detected: %s (%.2f)", d.class_name, d.confidence)
+                # Log detections only when debug flag is enabled
+                if self._settings.debug_detection_logs:
+                    for d in result.detections:
+                        logger.debug("Detected: %s (%.2f)", d.class_name, d.confidence)
 
                 # Serialize detections for the packet
                 detection_dicts = [d.to_dict() for d in result.detections]
@@ -198,14 +224,32 @@ class InferenceWorker:
                     detections=detection_dicts,
                     frame_index=packet.frame_index,
                     timestamp_ns=packet.timestamp_ns,
+                    capture_time_ms=packet.capture_time_ms,
+                    inference_time_ms=round(inference_ms, 1),
                 )
 
                 try:
                     self._queues.detection_queue.put_nowait(detection_packet)
                 except queue.Full:
+                    self._drop_count += 1
+                    try:
+                        self._queues.detection_queue.get_nowait()
+                    except queue.Empty:
+                        pass
+                    self._queues.detection_queue.put_nowait(detection_packet)
                     logger.debug(
-                        "Detection queue full, dropping result for frame %d",
+                        "Detection queue full, replaced oldest with frame %d",
                         packet.frame_index,
+                    )
+
+                if self._inference_count % 30 == 0:
+                    logger.info(
+                        "perf inference frame=%d capture_time_ms=%.1f input_age_ms=%.1f inference_time_ms=%.1f detection_queue=%d",
+                        packet.frame_index,
+                        packet.capture_time_ms,
+                        input_age_ms,
+                        inference_ms,
+                        self._queues.detection_queue.qsize(),
                     )
 
             except Exception:
@@ -231,4 +275,7 @@ class InferenceWorker:
             "is_running": self._is_running,
             "frames_processed": self._inference_count,
             "avg_inference_ms": round(self._avg_inference_ms, 1),
+            "avg_input_age_ms": round(self._avg_input_age_ms, 1),
+            "frames_dropped": self._drop_count,
+            "skip_frames": self._skip_frames,
         }

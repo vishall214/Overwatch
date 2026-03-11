@@ -36,6 +36,7 @@ class FramePacket:
     frame: np.ndarray
     frame_index: int
     timestamp_ns: int
+    capture_time_ms: float = 0.0
 
 
 @dataclass
@@ -56,6 +57,8 @@ class DetectionPacket:
     detections: list[dict[str, Any]]
     frame_index: int
     timestamp_ns: int
+    capture_time_ms: float = 0.0
+    inference_time_ms: float = 0.0
 
 
 @dataclass
@@ -76,6 +79,9 @@ class TrackingPacket:
     tracked_objects: list[dict[str, Any]]
     frame_index: int
     timestamp_ns: int
+    capture_time_ms: float = 0.0
+    inference_time_ms: float = 0.0
+    tracking_time_ms: float = 0.0
 
 
 @dataclass
@@ -98,6 +104,10 @@ class BehaviorPacket:
     behavior_events: list[dict[str, Any]]
     frame_index: int
     timestamp_ns: int
+    capture_time_ms: float = 0.0
+    inference_time_ms: float = 0.0
+    tracking_time_ms: float = 0.0
+    behavior_time_ms: float = 0.0
 
 
 class PipelineQueues:

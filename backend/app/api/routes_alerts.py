@@ -47,9 +47,21 @@ async def list_alerts(limit: int = 100) -> AlertListResponse:
         AlertListResponse: List of recent alerts.
     """
     service = _get_alert_service()
-    alerts = service.get_alerts(limit=limit)
+    rows = service.get_alerts(limit=limit)
+    alerts = [
+        AlertResponse(
+            id=r.id,
+            event_type=r.event_type,
+            timestamp=r.timestamp,
+            track_id=r.track_id,
+            zone=r.zone or "",
+            metadata=r.metadata_ or {},
+            snapshot_path=r.snapshot_path or "",
+        )
+        for r in rows
+    ]
     return AlertListResponse(
-        alerts=[AlertResponse(**a.to_dict()) for a in alerts],
+        alerts=alerts,
         total=service.get_alert_count(),
     )
 

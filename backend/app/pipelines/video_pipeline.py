@@ -24,6 +24,7 @@ from app.core.queues import PipelineQueues
 from app.services.video_service import VideoService
 from app.services.detection_service import DetectionService
 from app.services.alert_service import AlertService
+from app.services.face.face_service import FaceService
 from app.pipelines.capture_worker import CaptureWorker
 from app.pipelines.inference_worker import InferenceWorker
 from app.pipelines.tracking_worker import TrackingWorker
@@ -63,6 +64,7 @@ class VideoPipeline:
         detection_service: DetectionService,
         queues: PipelineQueues,
         alert_service: Optional[AlertService] = None,
+        face_service: Optional[FaceService] = None,
     ) -> None:
         """
         Initialize the VideoPipeline.
@@ -74,6 +76,7 @@ class VideoPipeline:
             detection_service: Service for running object detection.
             queues: Thread-safe inter-worker queues.
             alert_service: Optional alert service for behavior alerts.
+            face_service: Optional face recognition service.
         """
         self._settings: Settings = settings
         self._event_bus: EventBus = event_bus
@@ -81,6 +84,7 @@ class VideoPipeline:
         self._detection_service: DetectionService = detection_service
         self._queues: PipelineQueues = queues
         self._alert_service: Optional[AlertService] = alert_service
+        self._face_service: Optional[FaceService] = face_service
 
         self._capture_worker: Optional[CaptureWorker] = None
         self._inference_worker: Optional[InferenceWorker] = None
@@ -127,6 +131,14 @@ class VideoPipeline:
                 self._video_service.stop()
                 return False
 
+        # ── Load face recognition model (blocking I/O → executor) ──
+        if self._face_service is not None and not self._face_service.is_loaded:
+            face_ok = await loop.run_in_executor(
+                None, self._face_service.load_model,
+            )
+            if not face_ok:
+                logger.warning("Face recognition model failed to load — running without face ID")
+
         # ── Clear stale data from previous run ──────────────────
         self._queues.clear_all()
 
@@ -151,6 +163,7 @@ class VideoPipeline:
             queues=self._queues,
             event_bus=self._event_bus,
             alert_service=self._alert_service,
+            face_service=self._face_service,
         )
         self._stream_worker = StreamWorker(
             settings=self._settings,
@@ -233,51 +246,56 @@ class VideoPipeline:
         capture_stats = {
             "is_running": False,
             "frames_captured": 0,
+            "frames_dropped": 0,
+            "avg_capture_ms": 0.0,
+            "queue_depth": 0,
         }
         inference_stats = {
             "is_running": False,
             "frames_processed": 0,
             "avg_inference_ms": 0.0,
+            "avg_input_age_ms": 0.0,
+            "frames_dropped": 0,
+            "skip_frames": 0,
         }
         tracking_stats = {
             "is_running": False,
             "frames_tracked": 0,
+            "avg_tracking_ms": 0.0,
+            "avg_input_age_ms": 0.0,
+            "frames_dropped": 0,
         }
         behavior_stats = {
             "is_running": False,
             "frames_analyzed": 0,
+            "avg_behavior_ms": 0.0,
+            "avg_input_age_ms": 0.0,
+            "frames_dropped": 0,
+            "face_queue_depth": 0,
+            "pending_face_tracks": 0,
         }
         stream_stats = {
             "is_running": False,
             "frames_encoded": 0,
+            "avg_stream_ms": 0.0,
+            "avg_total_latency_ms": 0.0,
+            "frames_dropped": 0,
         }
 
         if self._capture_worker is not None:
-            capture_stats = {
-                "is_running": self._capture_worker.is_running,
-                "frames_captured": self._capture_worker.frame_count,
-            }
+            capture_stats = self._capture_worker.stats
 
         if self._inference_worker is not None:
             inference_stats = self._inference_worker.stats
 
         if self._tracking_worker is not None:
-            tracking_stats = {
-                "is_running": self._tracking_worker.is_running,
-                "frames_tracked": self._tracking_worker.track_count,
-            }
+            tracking_stats = self._tracking_worker.stats
 
         if self._behavior_worker is not None:
-            behavior_stats = {
-                "is_running": self._behavior_worker.is_running,
-                "frames_analyzed": self._behavior_worker.analyze_count,
-            }
+            behavior_stats = self._behavior_worker.stats
 
         if self._stream_worker is not None:
-            stream_stats = {
-                "is_running": self._stream_worker.is_running,
-                "frames_encoded": self._stream_worker.encode_count,
-            }
+            stream_stats = self._stream_worker.stats
 
         return {
             "is_running": self._is_running,

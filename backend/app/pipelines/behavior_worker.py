@@ -28,6 +28,7 @@ from app.config import Settings
 from app.core.event_bus import EventBus, Event
 from app.core.queues import PipelineQueues, TrackingPacket, BehaviorPacket
 from app.services.alert_service import AlertService
+from app.services.face.face_service import FaceService
 from app.utils.geometry_utils import point_in_polygon, bbox_center
 
 logger = logging.getLogger(__name__)
@@ -67,11 +68,13 @@ class BehaviorWorker:
         queues: PipelineQueues,
         event_bus: EventBus,
         alert_service: Optional[AlertService] = None,
+        face_service: Optional[FaceService] = None,
     ) -> None:
         self._settings: Settings = settings
         self._queues: PipelineQueues = queues
         self._event_bus: EventBus = event_bus
         self._alert_service: Optional[AlertService] = alert_service
+        self._face_service: Optional[FaceService] = face_service
         self._zone_polygon: list[tuple[float, float]] = [
             (float(p[0]), float(p[1])) for p in settings.zone_a
         ]
@@ -85,6 +88,14 @@ class BehaviorWorker:
         self._loiter_state: dict[int, float] = {}
         self._loiter_alerted: set[int] = set()
         self._crowd_alerted: bool = False
+        self._face_match_alerted: set[int] = set()
+        self._identity_cache: dict[int, dict] = {}
+        self._pending_tracks: set[int] = set()
+        self._face_queue: queue.Queue = queue.Queue(maxsize=32)
+        self._face_thread: Optional[threading.Thread] = None
+        self._drop_count: int = 0
+        self._avg_behavior_ms: float = 0.0
+        self._avg_input_age_ms: float = 0.0
 
     def start(self) -> None:
         """Start the behavior worker in a background thread."""
@@ -103,6 +114,26 @@ class BehaviorWorker:
         self._loiter_state.clear()
         self._loiter_alerted.clear()
         self._crowd_alerted = False
+        self._face_match_alerted.clear()
+        self._identity_cache.clear()
+        self._pending_tracks.clear()
+        self._drop_count = 0
+        self._avg_behavior_ms = 0.0
+        self._avg_input_age_ms = 0.0
+        # Drain any stale items from the face queue
+        while not self._face_queue.empty():
+            try:
+                self._face_queue.get_nowait()
+            except queue.Empty:
+                break
+        # Start background face recognition thread only when feature is enabled
+        if self._settings.enable_face_recognition and self._face_service is not None:
+            self._face_thread = threading.Thread(
+                target=self._face_worker_loop,
+                name="FaceWorker",
+                daemon=True,
+            )
+            self._face_thread.start()
         self._thread = threading.Thread(
             target=self._behavior_loop,
             name="BehaviorWorker",
@@ -112,8 +143,11 @@ class BehaviorWorker:
         logger.info("BehaviorWorker started")
 
     def stop(self) -> None:
-        """Stop the behavior worker and wait for the thread to finish."""
+        """Stop the behavior worker and wait for threads to finish."""
         self._is_running = False
+        if self._face_thread is not None:
+            self._face_thread.join(timeout=5.0)
+            self._face_thread = None
         if self._thread is not None:
             self._thread.join(timeout=5.0)
             self._thread = None
@@ -130,6 +164,62 @@ class BehaviorWorker:
             )
         else:
             logger.debug("No event loop available, skipping event publish")
+
+    def _face_worker_loop(self) -> None:
+        """Background thread: dequeue person crops, run InsightFace, update caches."""
+        logger.info("FaceWorker thread started")
+        while self._is_running:
+            try:
+                track_id, person_crop, frame = self._face_queue.get(timeout=0.5)
+            except queue.Empty:
+                continue
+
+            try:
+                faces = self._face_service.recognize_faces(person_crop)
+                if not faces:
+                    self._pending_tracks.discard(track_id)
+                    continue
+
+                top_face = faces[0]
+                if top_face["name"] != "Unknown":
+                    self._identity_cache[track_id] = {
+                        "name": top_face["name"],
+                        "confidence": top_face["confidence"],
+                    }
+
+                    # Fire face_match alert (once per track)
+                    if track_id not in self._face_match_alerted:
+                        self._face_match_alerted.add(track_id)
+                        match_event = {
+                            "name": top_face["name"],
+                            "track_id": track_id,
+                            "confidence": top_face["confidence"],
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        }
+                        self._publish_event(Event(
+                            type="FaceMatchDetected",
+                            data=match_event,
+                        ))
+                        if self._alert_service is not None:
+                            self._alert_service.create_alert(
+                                event_type="face_match",
+                                track_id=track_id,
+                                zone="",
+                                metadata=match_event,
+                                frame=frame,
+                            )
+                        logger.warning(
+                            "FACE MATCH: %s (track #%d, dist=%.4f)",
+                            top_face["name"], track_id, top_face["confidence"],
+                        )
+                else:
+                    # Unknown face — allow re-queuing on future frames
+                    self._pending_tracks.discard(track_id)
+            except Exception:
+                logger.exception("FaceWorker error on track #%d", track_id)
+                self._pending_tracks.discard(track_id)
+
+        logger.info("FaceWorker thread stopped")
 
     def _behavior_loop(self) -> None:
         """
@@ -152,6 +242,9 @@ class BehaviorWorker:
                     )
                 except queue.Empty:
                     continue
+
+                start_time = time.monotonic()
+                input_age_ms = (time.monotonic_ns() - packet.timestamp_ns) / 1_000_000
 
                 behavior_events: list[dict] = []
                 intrusion_detected = False
@@ -285,6 +378,57 @@ class BehaviorWorker:
                     self._loiter_alerted.discard(tid)
                     self._active_intrusions.discard(tid)
 
+                # --- Face recognition (disabled when enable_face_recognition=False) ---
+                face_results: list[dict] = []
+
+                if self._settings.enable_face_recognition:
+                    for obj in packet.tracked_objects:
+                        track_id = obj["track_id"]
+
+                        # Use cached identity if available
+                        if track_id in self._identity_cache:
+                            cached = self._identity_cache[track_id]
+                            face_results.append({
+                                "bbox": obj["bbox"],
+                                "name": cached["name"],
+                                "confidence": cached["confidence"],
+                            })
+                            continue
+
+                        # Skip non-persons and already-pending tracks
+                        if obj.get("class_name", "unknown") != "person":
+                            continue
+                        if track_id in self._pending_tracks:
+                            continue
+                        if self._face_service is None or not self._face_service.is_loaded:
+                            continue
+
+                        # Crop the person region and enqueue for background recognition
+                        bx = obj["bbox"]
+                        cx1 = max(0, int(bx[0]))
+                        cy1 = max(0, int(bx[1]))
+                        cx2 = min(packet.frame.shape[1], int(bx[2]))
+                        cy2 = min(packet.frame.shape[0], int(bx[3]))
+                        if cx2 - cx1 < 20 or cy2 - cy1 < 20:
+                            continue
+                        person_crop = packet.frame[cy1:cy2, cx1:cx2].copy()
+
+                        try:
+                            self._face_queue.put_nowait((
+                                track_id, person_crop, packet.frame,
+                            ))
+                            self._pending_tracks.add(track_id)
+                        except queue.Full:
+                            pass  # Drop — the person will be re-queued next frame
+
+                    # Clean up caches for tracks that disappeared
+                    stale_face_ids = self._face_match_alerted - current_track_ids
+                    self._face_match_alerted -= stale_face_ids
+                    for tid in list(self._identity_cache.keys()):
+                        if tid not in current_track_ids:
+                            del self._identity_cache[tid]
+                    self._pending_tracks -= (self._pending_tracks - current_track_ids)
+
                 # --- Draw zone overlay and alerts ---------------------
                 annotated = self._draw_zone_overlay(
                     packet.annotated_frame,
@@ -295,6 +439,10 @@ class BehaviorWorker:
                     loiter_timers,
                 )
 
+                # --- Draw face identity overlays ----------------------
+                annotated = self._draw_face_overlays(annotated, face_results)
+                behavior_time_ms = (time.monotonic() - start_time) * 1000
+
                 behavior_packet = BehaviorPacket(
                     frame=packet.frame,
                     annotated_frame=annotated,
@@ -302,15 +450,47 @@ class BehaviorWorker:
                     behavior_events=behavior_events,
                     frame_index=packet.frame_index,
                     timestamp_ns=packet.timestamp_ns,
+                    capture_time_ms=packet.capture_time_ms,
+                    inference_time_ms=packet.inference_time_ms,
+                    tracking_time_ms=packet.tracking_time_ms,
+                    behavior_time_ms=round(behavior_time_ms, 1),
                 )
+
+                self._analyze_count += 1
+                alpha = 0.1
+                if self._analyze_count == 1:
+                    self._avg_behavior_ms = behavior_time_ms
+                    self._avg_input_age_ms = input_age_ms
+                else:
+                    self._avg_behavior_ms = (
+                        alpha * behavior_time_ms + (1 - alpha) * self._avg_behavior_ms
+                    )
+                    self._avg_input_age_ms = (
+                        alpha * input_age_ms + (1 - alpha) * self._avg_input_age_ms
+                    )
 
                 try:
                     self._queues.behavior_queue.put_nowait(behavior_packet)
-                    self._analyze_count += 1
                 except queue.Full:
+                    self._drop_count += 1
+                    try:
+                        self._queues.behavior_queue.get_nowait()
+                    except queue.Empty:
+                        pass
+                    self._queues.behavior_queue.put_nowait(behavior_packet)
                     logger.debug(
-                        "Behavior queue full, dropping result for frame %d",
+                        "Behavior queue full, replaced oldest with frame %d",
                         packet.frame_index,
+                    )
+
+                if self._analyze_count % 30 == 0:
+                    logger.info(
+                        "perf behavior frame=%d input_age_ms=%.1f behavior_time_ms=%.1f behavior_queue=%d face_queue=%d",
+                        packet.frame_index,
+                        input_age_ms,
+                        behavior_time_ms,
+                        self._queues.behavior_queue.qsize(),
+                        self._face_queue.qsize(),
                     )
 
             except Exception:
@@ -405,6 +585,81 @@ class BehaviorWorker:
 
         return annotated
 
+    @staticmethod
+    def _draw_face_overlays(
+        frame: np.ndarray,
+        face_results: list[dict],
+    ) -> np.ndarray:
+        """
+        Draw face identity labels on the frame.
+
+        For each detected face, draws the name (or "Unknown Person")
+        and confidence score near the face bounding box.
+
+        Args:
+            frame: Annotated frame (modified in-place).
+            face_results: Results from FaceService.recognize_faces().
+
+        Returns:
+            np.ndarray: Frame with face identity labels.
+        """
+        if not face_results:
+            return frame
+
+        for fr in face_results:
+            x1, y1, x2, y2 = (
+                int(fr["bbox"][0]),
+                int(fr["bbox"][1]),
+                int(fr["bbox"][2]),
+                int(fr["bbox"][3]),
+            )
+            name = fr["name"]
+            dist = fr["confidence"]
+
+            if name != "Unknown":
+                label = f"Name: {name}"
+                conf_label = f"Confidence: {dist:.2f}"
+                colour = (0, 255, 0)
+            else:
+                label = "Unknown Person"
+                conf_label = ""
+                colour = (128, 128, 128)
+
+            # Draw face bbox
+            cv2.rectangle(frame, (x1, y1), (x2, y2), colour, 1)
+
+            # Name label
+            cv2.putText(
+                frame, label, (x1, y2 + 18),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, colour, 1,
+            )
+            if conf_label:
+                cv2.putText(
+                    frame, conf_label, (x1, y2 + 36),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, colour, 1,
+                )
+
+        return frame
+
+    @staticmethod
+    def _bbox_iou(
+        box_a: list[float],
+        box_b: list[float],
+    ) -> float:
+        """Compute IoU between two [x1, y1, x2, y2] boxes."""
+        xa = max(box_a[0], box_b[0])
+        ya = max(box_a[1], box_b[1])
+        xb = min(box_a[2], box_b[2])
+        yb = min(box_a[3], box_b[3])
+
+        inter = max(0.0, xb - xa) * max(0.0, yb - ya)
+        if inter == 0:
+            return 0.0
+
+        area_a = (box_a[2] - box_a[0]) * (box_a[3] - box_a[1])
+        area_b = (box_b[2] - box_b[0]) * (box_b[3] - box_b[1])
+        return inter / (area_a + area_b - inter)
+
     @property
     def is_running(self) -> bool:
         """Return whether the behavior worker is active."""
@@ -414,3 +669,16 @@ class BehaviorWorker:
     def analyze_count(self) -> int:
         """Return the number of frames analyzed."""
         return self._analyze_count
+
+    @property
+    def stats(self) -> dict:
+        """Return behavior worker statistics."""
+        return {
+            "is_running": self._is_running,
+            "frames_analyzed": self._analyze_count,
+            "avg_behavior_ms": round(self._avg_behavior_ms, 1),
+            "avg_input_age_ms": round(self._avg_input_age_ms, 1),
+            "frames_dropped": self._drop_count,
+            "face_queue_depth": self._face_queue.qsize(),
+            "pending_face_tracks": len(self._pending_tracks),
+        }

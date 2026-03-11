@@ -61,6 +61,8 @@ class CaptureWorker:
         self._thread: Optional[threading.Thread] = None
         self._is_running: bool = False
         self._frame_count: int = 0
+        self._drop_count: int = 0
+        self._avg_capture_ms: float = 0.0
 
     def start(self) -> None:
         """
@@ -75,6 +77,8 @@ class CaptureWorker:
 
         self._is_running = True
         self._frame_count = 0
+        self._drop_count = 0
+        self._avg_capture_ms = 0.0
         self._thread = threading.Thread(
             target=self._capture_loop,
             name="CaptureWorker",
@@ -110,11 +114,21 @@ class CaptureWorker:
 
         while self._is_running:
             try:
+                start_time = time.monotonic()
                 frame = self._video_service.read_frame()
+                capture_time_ms = (time.monotonic() - start_time) * 1000
 
                 if frame is None:
                     time.sleep(0.01)
                     continue
+
+                alpha = 0.1
+                if self._frame_count == 0:
+                    self._avg_capture_ms = capture_time_ms
+                else:
+                    self._avg_capture_ms = (
+                        alpha * capture_time_ms + (1 - alpha) * self._avg_capture_ms
+                    )
 
                 frame_index += 1
 
@@ -126,14 +140,21 @@ class CaptureWorker:
                     frame=frame,
                     frame_index=frame_index,
                     timestamp_ns=time.monotonic_ns(),
+                    capture_time_ms=round(capture_time_ms, 1),
                 )
 
                 try:
                     self._queues.frame_queue.put_nowait(packet)
                     self._frame_count += 1
                 except queue.Full:
-                    # Drop frame rather than blocking — keeps latency low
-                    logger.debug("Frame queue full, dropping frame %d", frame_index)
+                    self._drop_count += 1
+                    try:
+                        self._queues.frame_queue.get_nowait()
+                    except queue.Empty:
+                        pass
+                    self._queues.frame_queue.put_nowait(packet)
+                    self._frame_count += 1
+                    logger.debug("Frame queue full, replaced oldest with frame %d", frame_index)
 
             except Exception:
                 logger.exception("Error in capture loop")
@@ -150,3 +171,14 @@ class CaptureWorker:
     def frame_count(self) -> int:
         """Return the total number of frames captured."""
         return self._frame_count
+
+    @property
+    def stats(self) -> dict:
+        """Return capture worker statistics."""
+        return {
+            "is_running": self._is_running,
+            "frames_captured": self._frame_count,
+            "frames_dropped": self._drop_count,
+            "avg_capture_ms": round(self._avg_capture_ms, 1),
+            "queue_depth": self._queues.frame_queue.qsize(),
+        }

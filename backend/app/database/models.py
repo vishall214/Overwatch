@@ -1,0 +1,36 @@
+"""
+OVERWATCH — Database Models
+===============================
+SQLAlchemy ORM table definitions.
+"""
+
+from datetime import datetime
+
+from sqlalchemy import Column, DateTime, Integer, JSON, String
+
+from .database import Base
+
+
+class AlertRow(Base):
+    """Persistent alert record stored in PostgreSQL."""
+
+    __tablename__ = "alerts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_type = Column(String, nullable=False)
+    track_id = Column(Integer, nullable=True)
+    zone = Column(String, nullable=True)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    snapshot_path = Column(String, nullable=True)
+    metadata_ = Column("metadata", JSON, nullable=True)
+
+
+class FaceRow(Base):
+    """Watchlist face embedding stored in PostgreSQL."""
+
+    __tablename__ = "faces"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    embedding = Column(JSON, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)

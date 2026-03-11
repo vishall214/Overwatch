@@ -4,12 +4,11 @@ OVERWATCH — Alert Service
 Centralized alert management service that receives behavior events,
 converts them into alerts, saves snapshots, and provides API access.
 
-Phase 4: In-memory storage. Will be replaced by PostgreSQL later.
+Phase 5: PostgreSQL persistence via SQLAlchemy.
 """
 
 import logging
 import os
-import threading
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -17,7 +16,8 @@ import cv2
 import numpy as np
 
 from app.config import Settings
-from app.models.events import Alert
+from app.database.database import SessionLocal
+from app.database.crud import create_alert_row, get_recent_alerts, get_alert_count
 
 logger = logging.getLogger(__name__)
 
@@ -27,22 +27,15 @@ class AlertService:
     Manages alert creation, storage, and retrieval.
 
     Receives behavior events from the BehaviorWorker, converts them
-    into Alert records, optionally saves a snapshot of the current frame,
-    and stores alerts in-memory for API access.
+    into Alert records, saves snapshots, and persists alerts to
+    PostgreSQL.
 
     Attributes:
         _settings: Application configuration.
-        _alerts: In-memory alert storage.
-        _lock: Thread lock for safe concurrent access.
-        _next_id: Auto-incrementing alert ID counter.
     """
 
     def __init__(self, settings: Settings) -> None:
         self._settings: Settings = settings
-        self._alerts: list[Alert] = []
-        self._lock: threading.Lock = threading.Lock()
-        self._next_id: int = 1
-
         os.makedirs(settings.snapshots_dir, exist_ok=True)
 
     def create_alert(
@@ -52,9 +45,9 @@ class AlertService:
         zone: str = "",
         metadata: Optional[dict] = None,
         frame: Optional[np.ndarray] = None,
-    ) -> Alert:
+    ):
         """
-        Create and store a new alert from a behavior event.
+        Create and persist a new alert from a behavior event.
 
         Args:
             event_type: Type of behavior event (intrusion, loitering, crowd).
@@ -64,7 +57,7 @@ class AlertService:
             frame: Current video frame for snapshot capture.
 
         Returns:
-            Alert: The newly created alert.
+            AlertRow: The newly created database row.
         """
         now = datetime.now(timezone.utc)
         snapshot_path = ""
@@ -72,42 +65,47 @@ class AlertService:
         if frame is not None:
             snapshot_path = self._save_snapshot(event_type, now, frame)
 
-        with self._lock:
-            alert = Alert(
-                id=self._next_id,
+        db = SessionLocal()
+        try:
+            alert = create_alert_row(
+                db=db,
                 event_type=event_type,
-                timestamp=now,
                 track_id=track_id,
                 zone=zone,
-                metadata=metadata or {},
                 snapshot_path=snapshot_path,
+                metadata=metadata,
             )
-            self._alerts.append(alert)
-            self._next_id += 1
+            logger.info(
+                "Alert #%d created: %s track_id=%s zone=%s",
+                alert.id, event_type, track_id, zone,
+            )
+            return alert
+        finally:
+            db.close()
 
-        logger.info(
-            "Alert #%d created: %s track_id=%s zone=%s",
-            alert.id, event_type, track_id, zone,
-        )
-        return alert
-
-    def get_alerts(self, limit: int = 100) -> list[Alert]:
+    def get_alerts(self, limit: int = 100):
         """
-        Retrieve recent alerts, newest first.
+        Retrieve recent alerts from PostgreSQL, newest first.
 
         Args:
             limit: Maximum number of alerts to return.
 
         Returns:
-            list[Alert]: Recent alerts in reverse chronological order.
+            list[AlertRow]: Recent alerts in reverse chronological order.
         """
-        with self._lock:
-            return list(reversed(self._alerts[-limit:]))
+        db = SessionLocal()
+        try:
+            return get_recent_alerts(db, limit=limit)
+        finally:
+            db.close()
 
     def get_alert_count(self) -> int:
         """Return the total number of stored alerts."""
-        with self._lock:
-            return len(self._alerts)
+        db = SessionLocal()
+        try:
+            return get_alert_count(db)
+        finally:
+            db.close()
 
     def _save_snapshot(
         self,

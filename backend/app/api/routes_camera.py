@@ -22,8 +22,10 @@ from app.schemas.camera_schema import (
 from app.services.video_service import VideoService
 from app.services.detection_service import DetectionService
 from app.services.alert_service import AlertService
+from app.services.face.face_service import FaceService
 from app.pipelines.video_pipeline import VideoPipeline
 from app.api.routes_alerts import init_alert_routes
+from app.api.routes_faces import init_face_routes
 
 logger = logging.getLogger(__name__)
 
@@ -60,8 +62,18 @@ def init_camera_services(
     video_service = VideoService(settings)
     detection_service = DetectionService(settings)
     alert_service = AlertService(settings)
+    # FaceService() is always created so DB endpoints (list/delete) remain
+    # functional.  InsightFace models are NOT loaded here — load_model() is
+    # only called inside VideoPipeline.start() when face_service is non-None.
+    face_service = FaceService()
 
     init_alert_routes(alert_service)
+    init_face_routes(face_service)
+
+    # Only inject face_service into the pipeline when the feature flag is on.
+    # Passing None prevents model loading and keeps the pipeline free of any
+    # face-recognition CPU cost.
+    pipeline_face_service = face_service if settings.enable_face_recognition else None
 
     _pipeline = VideoPipeline(
         settings=settings,
@@ -70,6 +82,7 @@ def init_camera_services(
         detection_service=detection_service,
         queues=queues,
         alert_service=alert_service,
+        face_service=pipeline_face_service,
     )
 
     logger.info("Camera services initialized")

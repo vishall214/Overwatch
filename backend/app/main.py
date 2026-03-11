@@ -24,6 +24,8 @@ from app.core.dependencies import get_cached_settings, get_event_bus, get_pipeli
 from app.api.routes_camera import router as camera_router, init_camera_services
 from app.api.routes_alerts import router as alerts_router
 from app.api.routes_faces import router as faces_router
+from app.database.database import engine
+from app.database.models import Base
 
 # ── Initialize logging early ────────────────────────────────────
 setup_logging(level="INFO")
@@ -49,6 +51,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("=" * 60)
     logger.info("  OVERWATCH v%s starting up", settings.app_version)
     logger.info("=" * 60)
+
+    # ── Create database tables if they don't exist ───────────
+    Base.metadata.create_all(bind=engine)
+    logger.info("Database tables verified")
 
     # Initialize camera services and pipeline
     pipeline = init_camera_services(settings, event_bus, queues)

@@ -44,8 +44,11 @@ class Settings(BaseSettings):
     detection_device: str = "cpu"
 
     # ── Detection Classes ────────────────────────────────────────
-    # COCO class IDs to detect (0=person, 2=car, 56=chair, 39=bottle, 63=laptop, 67=cell phone)
-    detection_classes: list[int] = [0, 2, 39, 56, 63, 67]
+    # COCO class IDs to detect (0=person)
+    detection_classes: list[int] = [0]
+
+    # ── Debug ────────────────────────────────────────────────────
+    debug_detection_logs: bool = False
 
     # ── Streaming ────────────────────────────────────────────────
     stream_quality: int = 80  # JPEG encode quality (1-100)
@@ -61,6 +64,10 @@ class Settings(BaseSettings):
     pipeline_skip_frames: int = 3  # Only process every Nth frame (0 = every frame)
     pipeline_max_resolution: int = 640
     queue_size: int = 32  # Max items per inter-worker queue
+
+    # ── Face Recognition ────────────────────────────────────────
+    enable_face_recognition: bool = False  # Set True to re-enable at runtime
+    face_detection_size: int = 320
 
     # ── Behavior / Intrusion Zones ─────────────────────────────────
     zone_a: list[list[int]] = [[200, 100], [400, 100], [400, 300], [200, 300]]

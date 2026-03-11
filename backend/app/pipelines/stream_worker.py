@@ -59,6 +59,9 @@ class StreamWorker:
         self._thread: Optional[threading.Thread] = None
         self._is_running: bool = False
         self._encode_count: int = 0
+        self._drop_count: int = 0
+        self._avg_stream_ms: float = 0.0
+        self._avg_total_latency_ms: float = 0.0
 
     def start(self) -> None:
         """
@@ -73,6 +76,9 @@ class StreamWorker:
 
         self._is_running = True
         self._encode_count = 0
+        self._drop_count = 0
+        self._avg_stream_ms = 0.0
+        self._avg_total_latency_ms = 0.0
         self._thread = threading.Thread(
             target=self._encode_loop,
             name="StreamWorker",
@@ -117,26 +123,53 @@ class StreamWorker:
                     continue
 
                 # Encode the annotated frame as JPEG
+                start_time = time.monotonic()
                 encode_params = [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality]
                 success, buffer = cv2.imencode(".jpg", packet.annotated_frame, encode_params)
+                stream_time_ms = (time.monotonic() - start_time) * 1000
+                total_latency_ms = (time.monotonic_ns() - packet.timestamp_ns) / 1_000_000
 
                 if not success:
                     logger.warning("Failed to encode frame %d as JPEG", packet.frame_index)
                     continue
 
                 jpeg_bytes: bytes = buffer.tobytes()
+                self._encode_count += 1
+                alpha = 0.1
+                if self._encode_count == 1:
+                    self._avg_stream_ms = stream_time_ms
+                    self._avg_total_latency_ms = total_latency_ms
+                else:
+                    self._avg_stream_ms = (
+                        alpha * stream_time_ms + (1 - alpha) * self._avg_stream_ms
+                    )
+                    self._avg_total_latency_ms = (
+                        alpha * total_latency_ms + (1 - alpha) * self._avg_total_latency_ms
+                    )
 
                 try:
                     self._queues.stream_queue.put_nowait(jpeg_bytes)
-                    self._encode_count += 1
                 except queue.Full:
                     # Drop oldest frame and push the fresh one
+                    self._drop_count += 1
                     try:
                         self._queues.stream_queue.get_nowait()
                     except queue.Empty:
                         pass
                     self._queues.stream_queue.put_nowait(jpeg_bytes)
-                    self._encode_count += 1
+
+                if self._encode_count % 30 == 0:
+                    logger.info(
+                        "perf stream frame=%d capture_time_ms=%.1f inference_time_ms=%.1f tracking_time_ms=%.1f behavior_time_ms=%.1f stream_time_ms=%.1f total_latency_ms=%.1f stream_queue=%d",
+                        packet.frame_index,
+                        packet.capture_time_ms,
+                        packet.inference_time_ms,
+                        packet.tracking_time_ms,
+                        packet.behavior_time_ms,
+                        stream_time_ms,
+                        total_latency_ms,
+                        self._queues.stream_queue.qsize(),
+                    )
 
             except Exception:
                 logger.exception("Error in encode loop")
@@ -153,3 +186,14 @@ class StreamWorker:
     def encode_count(self) -> int:
         """Return the total number of frames encoded."""
         return self._encode_count
+
+    @property
+    def stats(self) -> dict:
+        """Return stream worker statistics."""
+        return {
+            "is_running": self._is_running,
+            "frames_encoded": self._encode_count,
+            "avg_stream_ms": round(self._avg_stream_ms, 1),
+            "avg_total_latency_ms": round(self._avg_total_latency_ms, 1),
+            "frames_dropped": self._drop_count,
+        }
