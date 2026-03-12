@@ -27,7 +27,12 @@ class Settings(BaseSettings):
     port: int = 8000
 
     # ── CORS ─────────────────────────────────────────────────────
-    cors_origins: list[str] = ["http://localhost:3000"]
+    cors_origins: list[str] = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
 
     # ── Video Capture ────────────────────────────────────────────
     video_source: str = "0"  # "0" for webcam, or file path / RTSP URL

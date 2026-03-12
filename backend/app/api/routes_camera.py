@@ -7,7 +7,7 @@ Endpoints for camera pipeline control and MJPEG streaming.
 import asyncio
 import logging
 import queue
-from typing import AsyncGenerator, Optional
+from typing import AsyncIterator, Optional
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -15,10 +15,7 @@ from fastapi.responses import StreamingResponse
 from app.config import Settings
 from app.core.event_bus import EventBus
 from app.core.queues import PipelineQueues
-from app.schemas.camera_schema import (
-    CameraStartRequest,
-    CameraStatusResponse,
-)
+from app.schemas.camera_schema import CameraStartRequest
 from app.services.video_service import VideoService
 from app.services.detection_service import DetectionService
 from app.services.alert_service import AlertService
@@ -117,7 +114,7 @@ def _get_pipeline() -> VideoPipeline:
     return _pipeline
 
 
-async def _mjpeg_generator() -> AsyncGenerator[bytes, None]:
+async def _mjpeg_generator() -> AsyncIterator[bytes]:
     """
     Async generator that yields MJPEG multipart frames from stream_queue.
 
@@ -130,18 +127,20 @@ async def _mjpeg_generator() -> AsyncGenerator[bytes, None]:
     Yields:
         bytes: MJPEG multipart frame chunk.
     """
-    if _queues is None or _pipeline is None:
+    pipeline: VideoPipeline = _pipeline  # type: ignore[assignment]
+    queues: PipelineQueues = _queues  # type: ignore[assignment]
+
+    if queues is None or pipeline is None:
         return
 
     loop = asyncio.get_running_loop()
 
-    while _pipeline.is_running:
+    while pipeline.is_running:
         try:
             # Offload blocking queue.get() to a thread pool so we
             # never stall the asyncio event loop while waiting.
             jpeg_bytes: bytes = await loop.run_in_executor(
-                None,
-                lambda: _queues.stream_queue.get(timeout=0.5),
+                None, lambda: queues.stream_queue.get(timeout=0.5)  # type: ignore[arg-type]
             )
         except queue.Empty:
             continue
@@ -166,23 +165,28 @@ async def start_pipeline(
 
     Accepts an optional video source override.
     Returns pipeline status after starting.
+    If the pipeline is already running, returns a success response immediately
+    so the start flow is idempotent (safe to call multiple times).
     """
     pipeline = _get_pipeline()
+    requested_source = request.source or pipeline.stats.get("source", {}).get("source")
+
+    logger.info("Camera start requested (source=%s)", requested_source)
 
     if pipeline.is_running:
-        raise HTTPException(
-            status_code=409,
-            detail="Pipeline is already running",
-        )
+        logger.info("Camera start request received but pipeline is already running — returning success")
+        return {"message": "Pipeline already running", "stats": pipeline.stats}
 
     success = await pipeline.start(source=request.source)
 
     if not success:
+        logger.error("Camera start failed (source=%s)", requested_source)
         raise HTTPException(
             status_code=500,
             detail="Failed to start pipeline. Check video source and model.",
         )
 
+    logger.info("Camera pipeline start request completed successfully")
     return {"message": "Pipeline started", "stats": pipeline.stats}
 
 
@@ -195,13 +199,17 @@ async def stop_pipeline() -> dict:
     """
     pipeline = _get_pipeline()
 
+    logger.info("Camera stop requested")
+
     if not pipeline.is_running:
+        logger.warning("Camera stop request ignored because pipeline is not running")
         raise HTTPException(
             status_code=409,
             detail="Pipeline is not running",
         )
 
     await pipeline.stop()
+    logger.info("Camera pipeline stop request completed successfully")
     return {"message": "Pipeline stopped"}
 
 

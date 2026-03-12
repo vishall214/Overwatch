@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useCallback } from "react";
 import { API } from "../api/config";
+import { useCameraStatus } from "../hooks/useCameraStatus";
 
 /**
  * CameraFeed — canvas-smoothed MJPEG renderer.
@@ -11,6 +12,8 @@ const CameraFeed = React.memo(function CameraFeed() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
   const rafRef = useRef<number>(0);
+  const { data: status } = useCameraStatus();
+  const cameraOnline = status?.is_running ?? false;
 
   const paint = useCallback(() => {
     const canvas = canvasRef.current;
@@ -29,17 +32,37 @@ const CameraFeed = React.memo(function CameraFeed() {
   }, []);
 
   useEffect(() => {
+    const canvas = canvasRef.current;
+
+    if (!cameraOnline) {
+      cancelAnimationFrame(rafRef.current);
+      if (imgRef.current) {
+        imgRef.current.src = "";
+        imgRef.current = null;
+      }
+
+      if (canvas) {
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+      }
+
+      return;
+    }
+
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.src = API.camera.stream;
     imgRef.current = img;
     rafRef.current = requestAnimationFrame(paint);
+
     return () => {
       cancelAnimationFrame(rafRef.current);
       img.src = "";
       imgRef.current = null;
     };
-  }, [paint]);
+  }, [cameraOnline, paint]);
 
   return (
     <div className="relative w-full h-full rounded-2xl overflow-hidden glass-panel-heavy scanline">
@@ -47,11 +70,21 @@ const CameraFeed = React.memo(function CameraFeed() {
         ref={canvasRef}
         className="w-full h-full object-contain bg-ow-bg"
       />
-      {/* Live indicator */}
-      <div className="absolute top-4 left-4 flex items-center gap-2 px-3 py-1.5 rounded-full bg-ow-alert-intrusion/15 backdrop-blur-md border border-ow-alert-intrusion/25">
-        <span className="w-2 h-2 rounded-full bg-ow-alert-intrusion animate-pulse" />
-        <span className="text-xs font-semibold text-ow-alert-intrusion/80 uppercase tracking-wider">Live</span>
-      </div>
+
+      {cameraOnline ? (
+        <div className="absolute top-4 left-4 flex items-center gap-2 px-3 py-1.5 rounded-full bg-ow-alert-intrusion/15 backdrop-blur-md border border-ow-alert-intrusion/25">
+          <span className="w-2 h-2 rounded-full bg-ow-alert-intrusion animate-pulse" />
+          <span className="text-xs font-semibold text-ow-alert-intrusion/80 uppercase tracking-wider">Live</span>
+        </div>
+      ) : (
+        <div className="absolute inset-0 flex items-center justify-center bg-ow-bg/45 backdrop-blur-sm">
+          <div className="rounded-2xl border border-[rgba(255,255,255,0.08)] bg-ow-teal/10 px-5 py-4 text-center">
+            <p className="text-sm font-semibold uppercase tracking-[0.22em] text-ow-mist/80">Camera Offline</p>
+            <p className="mt-2 text-xs text-ow-mist/55">Start the camera pipeline from the dashboard top bar.</p>
+          </div>
+        </div>
+      )}
+
       {/* Overlay label */}
       <div className="absolute bottom-4 left-4 px-3 py-1 rounded-lg bg-ow-bg/60 backdrop-blur-sm">
         <span className="text-xs text-ow-mist/60 font-mono">OVERWATCH — Primary Feed</span>

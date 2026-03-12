@@ -1,38 +1,24 @@
-﻿# ── PHASE 1: Core Backend ─────────────────────────────────────────────────────
-fastapi==0.111.0
-uvicorn[standard]==0.29.0
-pydantic==2.7.1
-pydantic-settings==2.3.4
-python-dotenv==1.0.1
+# ── PHASE 1: Core Backend ─────────────────────────────────────────────────────
+fastapi>=0.111,<0.112
+uvicorn[standard]>=0.29,<0.30
+pydantic>=2.7,<2.8
+pydantic-settings>=2.3,<2.4
+python-dotenv>=1.0,<2.0
 
 # ── PHASE 1: Video + Detection ───────────────────────────────────────────────
-opencv-python-headless==4.9.0.80
-numpy==1.26.4
-ultralytics==8.2.0
+opencv-python-headless>=4.9,<5.0
+numpy>=1.26,<2.0
+ultralytics>=8.2,<9.0
 
 # ── PHASE 1: Utilities ────────────────────────────────────────────────────────
-python-multipart==0.0.9
-aiofiles==23.2.1
+python-multipart>=0.0.9,<0.1
+aiofiles>=23.2,<24.0
 
 # ── PHASE 2: Tracking ────────────────────────────────────────────────────────
-supervision>=0.18.0
-lapx>=0.5.0
+supervision>=0.18,<1.0
 
 # ── PHASE 5: Database + Storage ───────────────────────────────────────────────
-sqlalchemy==2.0.30
-psycopg2-binary==2.9.9
+sqlalchemy>=2.0,<2.1
 
-# ── PHASE 6: Face Recognition ────────────────────────────────────────────────
-insightface>=0.7.3
-faiss-cpu>=1.8.0
-onnxruntime>=1.18.0
-
-# ── PHASE 7: Reports ─────────────────────────────────────────────────────────
-# reportlab==4.2.0
-
-# ── TESTING ───────────────────────────────────────────────────────────────────
-pytest==8.2.0
-pytest-asyncio==0.23.6
-httpx==0.27.0
-sqlalchemy==2.0.47
-psycopg2-binary==2.9.11
+# ── PHASE 5: Database (Postgres — optional, falls back to SQLite) ──────────────
+psycopg2-binary>=2.9,<3.0

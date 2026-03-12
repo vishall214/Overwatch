@@ -7,13 +7,19 @@ FastAPI backend for the OVERWATCH surveillance analysis system.
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-cp ../.env.example .env
-uvicorn app:app --reload --port 8000
+pip install -r requirements-dev.txt   # optional: tests / dev tooling
+copy ..\.env.example .env
+uvicorn app.main:app --reload --port 8000
 ```
 
 - API: http://localhost:8000
 - Docs: http://localhost:8000/docs
 - Health: http://localhost:8000/health
+
+## Dependency Layout
+
+- `requirements.txt`: runtime dependencies with compatible version ranges
+- `requirements-dev.txt`: runtime dependencies plus test/dev tools
 
 ## API Overview
 

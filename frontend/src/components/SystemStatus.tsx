@@ -1,9 +1,12 @@
 import { useSystemStatus, useSystemMetrics } from "../hooks/useSystemStatus";
+import { useCameraStatus } from "../hooks/useCameraStatus";
 import { Activity, Camera, Gauge, AlertTriangle, Layers } from "lucide-react";
 
 export default function SystemStatus() {
   const { data: status } = useSystemStatus();
+  const { data: cameraStatus } = useCameraStatus();
   const { data: metrics } = useSystemMetrics();
+  const cameraOnline = cameraStatus?.is_running ?? status?.camera_running ?? false;
 
   const queueTotal = metrics?.queues
     ? Object.values(metrics.queues).reduce((a, b) => a + b, 0)
@@ -12,9 +15,9 @@ export default function SystemStatus() {
   const stats = [
     {
       label: "Camera",
-      value: status?.camera_running ? "Online" : "Offline",
+      value: cameraOnline ? "Online" : "Offline",
       icon: Camera,
-      color: status?.camera_running ? "text-ow-accent" : "text-ow-alert-intrusion",
+      color: cameraOnline ? "text-ow-accent" : "text-ow-alert-intrusion",
     },
     {
       label: "Pipeline FPS",

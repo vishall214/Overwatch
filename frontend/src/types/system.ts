@@ -27,5 +27,6 @@ export interface SystemMetrics {
 }
 
 export interface CameraStatus {
+  is_running: boolean;
   [key: string]: unknown;
 }

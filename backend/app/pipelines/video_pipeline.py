@@ -115,6 +115,9 @@ class VideoPipeline:
             logger.warning("Pipeline already running")
             return False
 
+        resolved_source = source or self._settings.video_source
+        logger.info("Starting video pipeline (source=%s)", resolved_source)
+
         loop = asyncio.get_running_loop()
 
         # ── Open video source (blocking I/O → executor) ───────
@@ -122,7 +125,7 @@ class VideoPipeline:
             None, self._video_service.start, source,
         )
         if not opened:
-            logger.error("Failed to open video source")
+            logger.error("Failed to open video source during pipeline start (source=%s)", resolved_source)
             return False
 
         # ── Load detection model (blocking I/O → executor) ────
@@ -131,7 +134,7 @@ class VideoPipeline:
                 None, self._detection_service.load_model,
             )
             if not loaded:
-                logger.error("Failed to load detection model")
+                logger.error("Failed to load detection model during pipeline start")
                 self._video_service.stop()
                 return False
 
@@ -189,7 +192,7 @@ class VideoPipeline:
             data={"source": source or self._settings.video_source},
         ))
 
-        logger.info("Video pipeline started (5 workers)")
+        logger.info("Video pipeline started (5 workers, source=%s)", resolved_source)
         return True
 
     async def stop(self) -> None:

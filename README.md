@@ -12,7 +12,9 @@ docker compose up -d
 ```
 cd backend
 .venv\Scripts\Activate.ps1
-uvicorn app:app --reload --port 8000
+pip install -r requirements.txt
+pip install -r requirements-dev.txt   # optional: tests / dev tooling
+uvicorn app.main:app --reload --port 8000
 ```
 API: http://localhost:8000
 Docs: http://localhost:8000/docs

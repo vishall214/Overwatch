@@ -1,0 +1,7 @@
+# ── OPTIONAL: Face Recognition ───────────────────────────────────────────────
+# Install these only if you want face recognition (OVERWATCH_ENABLE_FACE_RECOGNITION=true)
+# These are large packages and may take a long time to install.
+lapx>=0.5,<1.0
+onnxruntime>=1.18,<2.0
+insightface>=0.7.3,<1.0
+faiss-cpu>=1.8,<2.0

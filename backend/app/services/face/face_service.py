@@ -3,16 +3,22 @@ OVERWATCH — Face Recognition Service
 ========================================
 Detects faces using InsightFace, generates 512-d embeddings,
 and queries the FAISS watchlist index for identity matches.
+
+InsightFace is an OPTIONAL dependency. The import is deferred to
+``load_model()`` so the service can be instantiated even when the
+package is not installed (face recognition will simply be unavailable).
 """
 
 import logging
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import numpy as np
-from insightface.app import FaceAnalysis
 
 from app.config import get_settings
 from .face_index import FaceIndex
+
+if TYPE_CHECKING:
+    from insightface.app import FaceAnalysis  # only for type hints
 
 logger = logging.getLogger(__name__)
 
@@ -22,13 +28,13 @@ class FaceService:
     Wraps InsightFace detection/embedding and FAISS search.
 
     Attributes:
-        _app: InsightFace analysis pipeline.
+        _app: InsightFace analysis pipeline (None until loaded).
         index: FAISS watchlist index.
         _is_loaded: Whether the model has been prepared.
     """
 
     def __init__(self) -> None:
-        self._app: Optional[FaceAnalysis] = None
+        self._app: Optional["FaceAnalysis"] = None
         self.index: FaceIndex = FaceIndex()
         self._is_loaded: bool = False
 
@@ -40,6 +46,7 @@ class FaceService:
             True if the model was loaded successfully.
         """
         try:
+            from insightface.app import FaceAnalysis  # lazy import
             settings = get_settings()
             det_size = int(settings.face_detection_size)
             self._app = FaceAnalysis(name="buffalo_l")
@@ -47,6 +54,12 @@ class FaceService:
             self._is_loaded = True
             logger.info("FaceService: InsightFace model loaded (det_size=%d)", det_size)
             return True
+        except ImportError:
+            logger.error(
+                "FaceService: insightface is not installed. "
+                "Run: pip install -r requirements-optional.txt"
+            )
+            return False
         except Exception:
             logger.exception("FaceService: failed to load InsightFace")
             return False
