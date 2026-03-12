@@ -1,0 +1,4 @@
+﻿/* Tailwind disabled — using plain CSS */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
