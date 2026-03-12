@@ -25,6 +25,8 @@ const queryClient = new QueryClient({
   },
 });
 
+import { CameraStreamProvider } from "./context/CameraStreamContext";
+
 function AppLayout() {
   const location = useLocation();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -61,9 +63,11 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <BrowserRouter>
-          <AppLayout />
-        </BrowserRouter>
+        <CameraStreamProvider>
+          <BrowserRouter>
+            <AppLayout />
+          </BrowserRouter>
+        </CameraStreamProvider>
       </AuthProvider>
     </QueryClientProvider>
   );

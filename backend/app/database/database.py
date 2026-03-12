@@ -8,26 +8,31 @@ Falls back to SQLite if DATABASE_URL is not set or Postgres is unavailable.
 
 import logging
 import os
+from typing import Any
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker, declarative_base
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
 _DATABASE_URL: str | None = os.getenv("DATABASE_URL")
-_SQLITE_FALLBACK = "sqlite:///./overwatch.db"
+_SQLITE_FALLBACK: str = "sqlite:///./overwatch.db"
 
 
-def _make_engine(url: str):
+def _make_engine(url: str) -> Engine:
     """Create a SQLAlchemy engine with sensible defaults for the given URL."""
-    connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
+    connect_args: dict[str, Any] = (
+        {"check_same_thread": False} if url.startswith("sqlite") else {}
+    )
     return create_engine(url, pool_pre_ping=True, connect_args=connect_args)
 
 
-def _resolve_engine():
+def _resolve_engine() -> Engine:
     """
     Try the configured DATABASE_URL first.
     If it is unset, unreachable, or the connection fails, fall back to SQLite.
@@ -58,7 +63,7 @@ def _resolve_engine():
     return eng
 
 
-engine = _resolve_engine()
+engine: Engine = _resolve_engine()
 
 SessionLocal = sessionmaker(
     autocommit=False,

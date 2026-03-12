@@ -1,6 +1,5 @@
 import React, { useRef, useEffect, useCallback } from "react";
-import { API } from "../api/config";
-import { useCameraStatus } from "../hooks/useCameraStatus";
+import { useCameraStream } from "../context/CameraStreamContext";
 
 /**
  * CameraFeed — canvas-smoothed MJPEG renderer.
@@ -12,34 +11,28 @@ const CameraFeed = React.memo(function CameraFeed() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
   const rafRef = useRef<number>(0);
-  const { data: status } = useCameraStatus();
-  const cameraOnline = status?.is_running ?? false;
+  const { imageElement, cameraOnline } = useCameraStream();
 
   const paint = useCallback(() => {
     const canvas = canvasRef.current;
-    const img = imgRef.current;
-    if (canvas && img && img.naturalWidth > 0) {
+    if (canvas && imageElement && imageElement.naturalWidth > 0) {
       const ctx = canvas.getContext("2d");
       if (ctx) {
-        if (canvas.width !== img.naturalWidth || canvas.height !== img.naturalHeight) {
-          canvas.width = img.naturalWidth;
-          canvas.height = img.naturalHeight;
+        if (canvas.width !== imageElement.naturalWidth || canvas.height !== imageElement.naturalHeight) {
+          canvas.width = imageElement.naturalWidth;
+          canvas.height = imageElement.naturalHeight;
         }
-        ctx.drawImage(img, 0, 0);
+        ctx.drawImage(imageElement, 0, 0);
       }
     }
     rafRef.current = requestAnimationFrame(paint);
-  }, []);
+  }, [imageElement]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
 
-    if (!cameraOnline) {
+    if (!cameraOnline || !imageElement) {
       cancelAnimationFrame(rafRef.current);
-      if (imgRef.current) {
-        imgRef.current.src = "";
-        imgRef.current = null;
-      }
 
       if (canvas) {
         const ctx = canvas.getContext("2d");
@@ -51,18 +44,12 @@ const CameraFeed = React.memo(function CameraFeed() {
       return;
     }
 
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.src = API.camera.stream;
-    imgRef.current = img;
     rafRef.current = requestAnimationFrame(paint);
 
     return () => {
       cancelAnimationFrame(rafRef.current);
-      img.src = "";
-      imgRef.current = null;
     };
-  }, [cameraOnline, paint]);
+  }, [cameraOnline, imageElement, paint]);
 
   return (
     <div className="relative w-full h-full rounded-2xl overflow-hidden glass-panel-heavy scanline">
