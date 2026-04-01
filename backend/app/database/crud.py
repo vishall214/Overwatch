@@ -9,7 +9,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from .models import AlertRow, FaceRow
+from .models import AlertRow, FaceRow, Zone
 
 
 def create_alert_row(
@@ -82,3 +82,48 @@ def delete_face_by_name(db: Session, name: str) -> bool:
     db.delete(row)
     db.commit()
     return True
+
+
+# ── Zone CRUD ────────────────────────────────────────────────────
+
+
+def create_zone(
+    db: Session,
+    zone_type: str,
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    name: Optional[str] = None,
+    camera_id: str = "default",
+) -> Zone:
+    """Insert a new zone and return it."""
+    row = Zone(
+        name=name,
+        type=zone_type,
+        x=x,
+        y=y,
+        width=width,
+        height=height,
+        camera_id=camera_id,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def get_zones(db: Session) -> list[Zone]:
+    """Return all active zones."""
+    return db.query(Zone).filter(Zone.is_active == True).all()  # noqa: E712
+
+
+def delete_zone(db: Session, zone_id: int) -> bool:
+    """Delete a zone by ID. Returns True if a row was deleted."""
+    row = db.query(Zone).filter(Zone.id == zone_id).first()
+    if row is None:
+        return False
+    db.delete(row)
+    db.commit()
+    return True
+

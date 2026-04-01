@@ -20,4 +20,9 @@ export const API = {
   },
   snapshots: (filename: string) => `${API_BASE}/snapshots/${encodeURIComponent(filename)}`,
   upload: `${API_BASE}/upload-video`,
+  zones: {
+    list: `${API_BASE}/zones`,
+    create: `${API_BASE}/zones`,
+    delete: (id: number) => `${API_BASE}/zones/${id}`,
+  },
 } as const;

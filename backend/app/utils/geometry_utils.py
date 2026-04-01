@@ -115,3 +115,36 @@ def bbox_iou(bbox_a: list[float], bbox_b: list[float]) -> float:
         return 0.0
 
     return intersection / union
+
+
+def rect_intersects_bbox(
+    zone: dict,
+    bbox: list[float],
+    frame_w: int,
+    frame_h: int,
+) -> bool:
+    """
+    Check if a normalized zone rectangle intersects a pixel bounding box.
+
+    Args:
+        zone: Dict with normalized x, y, width, height (0–1 range).
+        bbox: Bounding box as [x1, y1, x2, y2] in pixel coordinates.
+        frame_w: Frame width in pixels.
+        frame_h: Frame height in pixels.
+
+    Returns:
+        bool: True if the zone and bbox overlap.
+    """
+    # Convert normalized zone to pixel coordinates
+    zx1 = zone["x"] * frame_w
+    zy1 = zone["y"] * frame_h
+    zx2 = (zone["x"] + zone["width"]) * frame_w
+    zy2 = (zone["y"] + zone["height"]) * frame_h
+
+    # AABB overlap test
+    return not (
+        bbox[2] < zx1
+        or bbox[0] > zx2
+        or bbox[3] < zy1
+        or bbox[1] > zy2
+    )

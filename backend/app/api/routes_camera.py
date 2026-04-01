@@ -24,7 +24,9 @@ from app.pipelines.video_pipeline import VideoPipeline
 from app.api.routes_alerts import init_alert_routes
 from app.api.routes_faces import init_face_routes
 from app.api.routes_system import init_system_routes
+from app.api.routes_zones import init_zone_routes
 from app.core.dependencies import get_module_controller, get_system_monitor
+from app.services.zone_service import ZoneService
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +72,11 @@ def init_camera_services(
     init_alert_routes(alert_service)
     init_face_routes(face_service)
 
+    # Zone service — load from DB once, cache in memory
+    zone_service = ZoneService()
+    zone_service.load_zones()
+    init_zone_routes(zone_service)
+
     # Only inject face_service into the pipeline when the feature flag is on.
     # Passing None prevents model loading and keeps the pipeline free of any
     # face-recognition CPU cost.
@@ -84,6 +91,7 @@ def init_camera_services(
         alert_service=alert_service,
         face_service=pipeline_face_service,
         module_controller=module_controller,
+        zone_service=zone_service,
     )
 
     # Wire up the SystemMonitor with all required references
