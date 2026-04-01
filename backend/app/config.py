@@ -66,7 +66,8 @@ class Settings(BaseSettings):
     clips_dir: str = "storage/clips"
 
     # ── Pipeline ─────────────────────────────────────────────────
-    pipeline_skip_frames: int = 3  # Only process every Nth frame (0 = every frame)
+    pipeline_skip_frames: int = 1  # Capture-stage frame skipping (1 = no skipping)
+    inference_skip_frames: int = 1  # Inference-stage skip (1 = no extra skipping)
     pipeline_max_resolution: int = 640
     queue_size: int = 32  # Max items per inter-worker queue
 

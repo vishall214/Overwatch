@@ -74,7 +74,8 @@ class InferenceWorker:
         self._inference_count: int = 0
         self._avg_inference_ms: float = 0.0
         self._frame_skip_counter: int = 0
-        self._skip_frames: int = 3
+        # Keep inference skipping configurable; default is 1 (no extra skipping).
+        self._skip_frames: int = max(1, int(settings.inference_skip_frames))
         self._drop_count: int = 0
         self._avg_input_age_ms: float = 0.0
 
