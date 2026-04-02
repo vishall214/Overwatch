@@ -14,6 +14,7 @@ export default function AlertsPanel() {
   const { data, isLoading } = useAlerts(20);
   const listRef = useRef<HTMLDivElement>(null);
   const prevCountRef = useRef(0);
+  const MAX_VISIBLE_ALERTS = 10;
 
   useEffect(() => {
     if (!data || !listRef.current) return;
@@ -40,7 +41,7 @@ export default function AlertsPanel() {
     );
   }
 
-  const alerts = data?.alerts ?? [];
+  const alerts = (data?.alerts ?? []).slice(0, MAX_VISIBLE_ALERTS);
 
   return (
     <GlassCard title="Alerts" badge={alerts.length}>

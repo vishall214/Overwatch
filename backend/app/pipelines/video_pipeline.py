@@ -177,6 +177,9 @@ class VideoPipeline:
             module_controller=self._module_controller,
             zone_service=self._zone_service,
         )
+        # Wire behavior_worker into capture_worker for state reset on source changes
+        self._capture_worker.set_behavior_worker(self._behavior_worker)
+
         self._stream_worker = StreamWorker(
             settings=self._settings,
             queues=self._queues,
@@ -241,6 +244,30 @@ class VideoPipeline:
         ))
 
         logger.info("Video pipeline stopped (processed %d frames)", frames_processed)
+
+    def switch_source(self, source_type: str, path: Optional[str] = None) -> bool:
+        """
+        Switch to a different video source during pipeline runtime.
+
+        Changes the active source and resets behavior worker event state
+        to prevent stale detections from the previous source.
+
+        Args:
+            source_type: One of "camera", "demo", or "upload".
+            path: File path for demo/upload sources, None for camera.
+
+        Returns:
+            bool: True if source switch was successful.
+        """
+        if not self._is_running:
+            logger.warning("Cannot switch source when pipeline is not running")
+            return False
+
+        if self._capture_worker is None:
+            logger.error("CaptureWorker not initialized")
+            return False
+
+        return self._capture_worker.switch_source(source_type, path)
 
     @property
     def is_running(self) -> bool:

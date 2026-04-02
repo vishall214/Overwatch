@@ -42,6 +42,7 @@ class VideoService:
         self._capture: Optional[cv2.VideoCapture] = None
         self._is_running: bool = False
         self._source: str = settings.video_source
+        self._loop_enabled: bool = False
 
     def start(self, source: Optional[str] = None) -> bool:
         """
@@ -101,12 +102,24 @@ class VideoService:
         ret, frame = self._capture.read()
 
         if not ret:
+            # Loop video files if enabled
+            if self._loop_enabled:
+                self._capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                ret, frame = self._capture.read()
+                if ret:
+                    logger.debug("Video looped back to start")
+                    frame = self._resize_frame(frame)
+                    return frame
             logger.warning("Failed to read frame from source: %s", self._source)
             return None
 
         # Enforce maximum resolution
         frame = self._resize_frame(frame)
         return frame
+
+    def set_loop_enabled(self, enabled: bool) -> None:
+        """Enable or disable video file looping."""
+        self._loop_enabled = enabled
 
     def _resize_frame(self, frame: np.ndarray) -> np.ndarray:
         """

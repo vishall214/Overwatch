@@ -5,7 +5,7 @@ export function useAlerts(limit = 100) {
   return useQuery({
     queryKey: ["alerts", limit],
     queryFn: () => fetchAlerts(limit),
-    refetchInterval: 2000,
+    refetchInterval: 5000,
   });
 }
 

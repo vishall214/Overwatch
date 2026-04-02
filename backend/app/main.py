@@ -23,10 +23,14 @@ from app.core.logger import setup_logging
 from app.core.dependencies import get_cached_settings, get_event_bus, get_pipeline_queues
 from app.api.routes_camera import router as camera_router, init_camera_services
 from app.api.routes_alerts import router as alerts_router
+from app.api.routes_analytics import router as analytics_router
+from app.api.routes_auth import router as auth_router
 from app.api.routes_faces import router as faces_router
 from app.api.routes_system import router as system_router
 from app.api.routes_monitoring import router as monitoring_router
 from app.api.routes_zones import router as zones_router
+from app.api.routes_video import router as video_router, init_video_routes
+from app.services.source_manager import SourceManager
 from app.database.database import engine
 from app.database.models import Base
 
@@ -55,13 +59,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("  OVERWATCH v%s starting up", settings.app_version)
     logger.info("=" * 60)
 
-    # ── Create database tables if they don't exist ───────────
+    # Create database tables if they don't exist ───────────────
     Base.metadata.create_all(bind=engine)
     logger.info("Database tables verified")
 
     # Initialize camera services and pipeline
     pipeline = init_camera_services(settings, event_bus, queues)
     logger.info("All services initialized")
+
+    # Initialize video routes with pipeline and source manager
+    source_manager = SourceManager()
+    init_video_routes(pipeline, source_manager)
+    logger.info("Video routes initialized")
 
     yield
 
@@ -105,7 +114,10 @@ def create_app() -> FastAPI:
 
     # ── Register Routes ──────────────────────────────────────────
     application.include_router(camera_router)
+    application.include_router(video_router)
+    application.include_router(auth_router)
     application.include_router(alerts_router)
+    application.include_router(analytics_router)
     application.include_router(faces_router)
     application.include_router(system_router)
     application.include_router(monitoring_router)

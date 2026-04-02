@@ -1,47 +1,58 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
+import {
+  clearAuthSession,
+  getStoredUserEmail,
+  getToken,
+  setAuthSession,
+} from "../api/auth";
+import { login as loginRequest, signup as signupRequest } from "../services/authService";
 
 interface AuthState {
   isAuthenticated: boolean;
   user: string | null;
-  login: (username: string, password: string) => Promise<boolean>;
-  register: (email: string, password: string, name: string) => Promise<void>;
+  token: string | null;
+  login: (email: string, password: string) => Promise<void>;
+  register: (email: string, password: string) => Promise<void>;
   logout: () => void;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<string | null>(() => {
-    return sessionStorage.getItem("ow_user");
-  });
+  const [token, setToken] = useState<string | null>(() => getToken());
+  const [user, setUser] = useState<string | null>(() => getStoredUserEmail());
 
-  const login = useCallback(async (username: string, _password: string): Promise<boolean> => {
-    // Demo auth for now — will integrate with backend POST /auth/login
-    if (username.trim().length > 0) {
-      setUser(username);
-      sessionStorage.setItem("ow_user", username);
-      return true;
-    }
-    return false;
+  const login = useCallback(async (email: string, password: string): Promise<void> => {
+    const res = await loginRequest(email, password);
+    setAuthSession(res.access_token, email);
+    setToken(res.access_token);
+    setUser(email);
   }, []);
 
-  const register = useCallback(async (email: string, password: string, name: string): Promise<void> => {
-    // Demo registration for now — will integrate with backend POST /auth/signup
-    if (!email || !password || !name) {
-      throw new Error("All fields are required");
-    }
-    // In real implementation, this would call POST /auth/signup
-    setUser(name);
-    sessionStorage.setItem("ow_user", name);
+  const register = useCallback(async (email: string, password: string): Promise<void> => {
+    const res = await signupRequest(email, password);
+    setAuthSession(res.access_token, email);
+    setToken(res.access_token);
+    setUser(email);
   }, []);
 
   const logout = useCallback(() => {
+    setToken(null);
     setUser(null);
-    sessionStorage.removeItem("ow_user");
+    clearAuthSession();
   }, []);
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated: !!user, user, login, register, logout }}>
+    <AuthContext.Provider
+      value={{
+        isAuthenticated: !!token,
+        token,
+        user,
+        login,
+        register,
+        logout,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

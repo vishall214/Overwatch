@@ -4,12 +4,13 @@ OVERWATCH — Database CRUD Operations
 Functions for creating and querying alert records.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
-from .models import AlertRow, FaceRow, Zone
+from .models import AlertRow, FaceRow, Zone, User
 
 
 def create_alert_row(
@@ -127,3 +128,146 @@ def delete_zone(db: Session, zone_id: int) -> bool:
     db.commit()
     return True
 
+
+# ── Analytics CRUD ────────────────────────────────────────────────
+
+
+def get_alerts_over_time(
+    db: Session,
+    interval: str = "minute",
+    range_hours: int = 1,
+) -> list[dict]:
+    """
+    Get alert counts grouped by time interval.
+
+    Uses SQL aggregation with GROUP BY for performance.
+
+    Args:
+        db: Database session.
+        interval: "minute" or "hour" (default: minute).
+        range_hours: Time window in hours (default: 1).
+
+    Returns:
+        List of dicts with 'time' and 'count' keys.
+    """
+    if interval not in ["minute", "hour"]:
+        interval = "minute"
+
+    if range_hours < 1 or range_hours > 24:
+        range_hours = 1
+
+    # Determine SQL date truncation
+    trunc_str = f"'{interval}'" if interval else "'minute'"
+    interval_sql = f"DATE_TRUNC({trunc_str}, timestamp)"
+
+    # Build query with parameterized time window
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=range_hours)
+
+    query = f"""
+        SELECT
+            {interval_sql} AS bucket,
+            COUNT(*) as count
+        FROM alerts
+        WHERE timestamp >= :cutoff
+        GROUP BY bucket
+        ORDER BY bucket ASC
+    """
+
+    rows = db.execute(
+        text(query),
+        {"cutoff": cutoff},
+    ).fetchall()
+
+    return [
+        {
+            "time": row[0].isoformat() if row[0] else "",
+            "count": row[1],
+        }
+        for row in rows
+    ]
+
+
+def get_event_distribution(
+    db: Session,
+    range_hours: int = 24,
+) -> dict[str, int]:
+    """
+    Get alert counts grouped by event type.
+
+    Uses SQL aggregation for performance.
+
+    Args:
+        db: Database session.
+        range_hours: Time window in hours (default: 24).
+
+    Returns:
+        Dict with event_type as key and count as value.
+    """
+    if range_hours < 1 or range_hours > 24:
+        range_hours = 24
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=range_hours)
+
+    rows = (
+        db.query(
+            AlertRow.event_type,
+            func.count(AlertRow.id).label("count"),
+        )
+        .filter(AlertRow.timestamp >= cutoff)
+        .group_by(AlertRow.event_type)
+        .all()
+    )
+
+    return {row[0]: row[1] for row in rows}
+
+
+def get_alert_summary(
+    db: Session,
+    range_hours: int = 24,
+) -> dict[str, int]:
+    """
+    Get summary of alerts by type and total count.
+
+    Args:
+        db: Database session.
+        range_hours: Time window in hours (default: 24).
+
+    Returns:
+        Dict with total, intrusion, loitering, crowd counts.
+    """
+    if range_hours < 1 or range_hours > 24:
+        range_hours = 24
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=range_hours)
+
+    # Total count
+    total = db.query(func.count(AlertRow.id)).filter(
+        AlertRow.timestamp >= cutoff
+    ).scalar() or 0
+
+    # Distribution by type
+    distribution = get_event_distribution(db, range_hours)
+
+    return {
+        "total": total,
+        "intrusion": distribution.get("intrusion", 0),
+        "loitering": distribution.get("loitering", 0),
+        "crowd": distribution.get("crowd", 0),
+    }
+
+
+# ── Auth CRUD ─────────────────────────────────────────────────────
+
+
+def get_user_by_email(db: Session, email: str) -> User | None:
+    """Find a user by unique email."""
+    return db.query(User).filter(User.email == email).first()
+
+
+def create_user(db: Session, email: str, password_hash: str) -> User:
+    """Create and persist a new user record."""
+    user = User(email=email, password_hash=password_hash)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user

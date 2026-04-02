@@ -1,254 +1,390 @@
-import { useState, useRef } from "react";
-import { useAuth } from "../context/AuthContext";
-import { useAlertStats } from "../hooks/useAlerts";
-import { useSystemMetrics } from "../hooks/useSystemStatus";
-import { Navigate } from "react-router-dom";
+import React, { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
+  LineChart,
+  Line,
   PieChart,
   Pie,
   Cell,
-  RadialBarChart,
-  RadialBar,
+  ResponsiveContainer,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
 } from "recharts";
-import { Upload, CheckCircle, Loader2, BarChart3 } from "lucide-react";
+import { BarChart3, Activity, AlertTriangle } from "lucide-react";
+import {
+  getAlertsOverTime,
+  getDistribution,
+  getSummary,
+  getRecentAlerts,
+  type TimeSeriesPoint,
+  type SummaryMetrics,
+  type EventDistribution,
+  type AlertRecord,
+} from "../services/analyticsService";
 
-const COLORS = ["#2BD4A8", "#FF4D4D", "#FF9F40", "#3BA8FF", "#1BC47F"];
+// Color scheme for events
+const EVENT_COLORS = {
+  intrusion: "#e74c3c",
+  loitering: "#f39c12",
+  crowd: "#3498db",
+};
 
-export default function Analytics() {
-  const { isAuthenticated } = useAuth();
-
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
-  }
-
-  return <AnalyticsContent />;
+interface SummaryCardProps {
+  title: string;
+  value: number;
+  icon: React.ReactNode;
+  color: string;
+  denom?: string;
 }
 
-function AnalyticsContent() {
-  const { data: alertStats } = useAlertStats();
-  const { data: metrics } = useSystemMetrics();
+const SummaryCard: React.FC<SummaryCardProps> = ({
+  title,
+  value,
+  icon,
+  color,
+  denom,
+}) => (
+  <div className="rounded-2xl glass-panel p-4 border border-[rgba(255,255,255,0.08)]">
+    <div className="flex items-start justify-between mb-3">
+      <div>
+        <p className="text-xs uppercase tracking-wider text-ow-mist/50 font-semibold mb-1">
+          {title}
+        </p>
+        <p className="text-2xl font-bold text-ow-light/90">{value}</p>
+        {denom && <p className="text-xs text-ow-mist/40 mt-1">{denom}</p>}
+      </div>
+      <div
+        className="p-2 rounded-lg"
+        style={{ backgroundColor: `${color}15`, borderColor: `${color}30` }}
+      >
+        {icon}
+      </div>
+    </div>
+  </div>
+);
 
-  // Alert distribution data
-  const distData = alertStats
-    ? [
-        { name: "Intrusion", value: alertStats.intrusion },
-        { name: "Loitering", value: alertStats.loitering },
-        { name: "Crowd", value: alertStats.crowd },
-        { name: "Face Match", value: alertStats.face_match },
-      ].filter((d) => d.value > 0)
-    : [];
+interface CustomTooltipProps {
+  active?: boolean;
+  payload?: Array<{ value: number; name: string }>;
+  label?: string;
+}
 
-  // Pipeline performance data
-  const pipelineData = metrics
-    ? Object.entries(metrics)
-        .filter(([k]) => k !== "queues")
-        .map(([name, stage]) => ({
-          name: name.charAt(0).toUpperCase() + name.slice(1),
-          processed: (stage as Record<string, unknown>).items_processed as number ?? 0,
-          avgTime: Number(((stage as Record<string, unknown>).processing_time_avg as number ?? 0).toFixed(2)),
-        }))
-    : [];
+const CustomTooltip: React.FC<CustomTooltipProps> = ({
+  active,
+  payload,
+  label,
+}) => {
+  if (active && payload && payload.length) {
+    return (
+      <div className="rounded-lg bg-ow-bg/80 backdrop-blur border border-ow-mist/20 p-2 shadow-lg">
+        <p className="text-xs text-ow-mist/70">{label}</p>
+        <p className="text-sm font-semibold text-ow-teal">{payload[0].value}</p>
+      </div>
+    );
+  }
+  return null;
+};
 
-  // Queue data
-  const queueData = metrics?.queues
-    ? Object.entries(metrics.queues).map(([name, size]) => ({
-        name,
-        value: size,
-        fill: COLORS[Math.abs(name.charCodeAt(0)) % COLORS.length],
-      }))
-    : [];
+interface RecentAlertItemProps {
+  alert: AlertRecord;
+}
+
+const RecentAlertItem: React.FC<RecentAlertItemProps> = ({ alert }) => {
+  const color =
+    EVENT_COLORS[alert.event_type as keyof typeof EVENT_COLORS] ||
+    "#ffffff";
+  const time = new Date(alert.timestamp);
+  const timeStr = time.toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
 
   return (
-    <div className="space-y-5">
-      {/* Stats cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {[
-          { label: "Total Alerts", value: alertStats?.total_alerts ?? 0, color: "text-ow-accent" },
-          { label: "Intrusion", value: alertStats?.intrusion ?? 0, color: "text-ow-alert-intrusion" },
-          { label: "Loitering", value: alertStats?.loitering ?? 0, color: "text-ow-alert-loitering" },
-          { label: "Crowd", value: alertStats?.crowd ?? 0, color: "text-ow-alert-crowd" },
-        ].map((s) => (
-          <div key={s.label} className="rounded-2xl glass-panel p-5">
-            <div className="text-xs text-ow-mist/35 uppercase tracking-wider mb-2">{s.label}</div>
-            <div className={`text-3xl font-bold font-mono ${s.color}`}>{s.value}</div>
+    <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-ow-bg/40 border border-[rgba(255,255,255,0.04)] hover:border-[rgba(255,255,255,0.12)] transition-colors">
+      <div
+        className="w-3 h-3 rounded-full flex-shrink-0"
+        style={{ backgroundColor: color }}
+      />
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-ow-light/80 capitalize">
+          {alert.event_type}
+        </p>
+        <p className="text-xs text-ow-mist/50">{alert.zone}</p>
+      </div>
+      <p className="text-xs text-ow-mist/40 flex-shrink-0">{timeStr}</p>
+    </div>
+  );
+};
+
+export default function Analytics() {
+  const [timeRange, setTimeRange] = useState<"1h" | "6h" | "24h">("24h");
+  const pollInterval = 5000;
+
+  // Fetch summary metrics
+  const { data: summaryData, isLoading: summaryLoading } = useQuery({
+    queryKey: ["summary", timeRange],
+    queryFn: () => getSummary(timeRange),
+    refetchInterval: pollInterval,
+  });
+
+  // Fetch alerts over time  
+  const { data: timeSeriesData, isLoading: timeSeriesLoading } = useQuery({
+    queryKey: ["alertsOverTime", timeRange],
+    queryFn: () =>
+      getAlertsOverTime(timeRange === "1h" ? "minute" : "hour", timeRange),
+    refetchInterval: pollInterval,
+  });
+
+  // Fetch distribution
+  const { data: distributionData, isLoading: distributionLoading } = useQuery({
+    queryKey: ["distribution", timeRange],
+    queryFn: () => getDistribution(timeRange),
+    refetchInterval: pollInterval,
+  });
+
+  // Fetch recent alerts
+  const { data: recentAlertsData, isLoading: recentLoading } = useQuery({
+    queryKey: ["recentAlerts"],
+    queryFn: () => getRecentAlerts(15),
+    refetchInterval: pollInterval,
+  });
+
+  // Memoize chart data to prevent unnecessary re-renders
+  const chartData = useMemo(
+    () => timeSeriesData?.data || [],
+    [timeSeriesData?.data]
+  );
+
+  const distributionChartData = useMemo(() => {
+    if (!distributionData?.data) return [];
+    return Object.entries(distributionData.data).map(([type, count]) => ({
+      name: type.charAt(0).toUpperCase() + type.slice(1),
+      value: count,
+      fill: EVENT_COLORS[type as keyof typeof EVENT_COLORS] || "#ffffff",
+    }));
+  }, [distributionData?.data]);
+
+  const summary = summaryData?.data;
+
+  const isLoading = summaryLoading || timeSeriesLoading;
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-ow-teal to-ow-accent flex items-center justify-center">
+            <BarChart3 className="w-6 h-6 text-white" />
           </div>
-        ))}
+          <div>
+            <h1 className="text-2xl font-bold text-ow-light/90">Analytics</h1>
+            <p className="text-sm text-ow-mist/50">
+              Real-time alert trends and event distribution
+            </p>
+          </div>
+        </div>
+
+        {/* Time range selector */}
+        <div className="flex gap-2">
+          {(["1h", "6h", "24h"] as const).map((range) => (
+            <button
+              key={range}
+              onClick={() => setTimeRange(range)}
+              className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+                timeRange === range
+                  ? "bg-ow-teal/30 border border-ow-teal/50 text-ow-teal/90"
+                  : "bg-ow-bg/40 border border-[rgba(255,255,255,0.08)] text-ow-mist/70 hover:border-ow-teal/30"
+              }`}
+            >
+              {range}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* Charts row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {/* Alert distribution */}
-        <div className="rounded-2xl glass-panel p-5">
-          <h3 className="text-sm font-semibold text-ow-mist/70 uppercase tracking-wider mb-4">Alert Distribution</h3>
-          {distData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={250}>
+      {/* Summary Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <SummaryCard
+          title="Total Alerts"
+          value={summary?.total || 0}
+          icon={<AlertTriangle size={20} className="text-ow-mist/60" />}
+          color="#3498db"
+          denom="Last 24h"
+        />
+        <SummaryCard
+          title="Intrusions"
+          value={summary?.intrusion || 0}
+          icon={
+            <div
+              className="w-5 h-5 rounded"
+              style={{ backgroundColor: EVENT_COLORS.intrusion }}
+            />
+          }
+          color={EVENT_COLORS.intrusion}
+        />
+        <SummaryCard
+          title="Loitering"
+          value={summary?.loitering || 0}
+          icon={
+            <div
+              className="w-5 h-5 rounded"
+              style={{ backgroundColor: EVENT_COLORS.loitering }}
+            />
+          }
+          color={EVENT_COLORS.loitering}
+        />
+        <SummaryCard
+          title="Crowd Events"
+          value={summary?.crowd || 0}
+          icon={
+            <div
+              className="w-5 h-5 rounded"
+              style={{ backgroundColor: EVENT_COLORS.crowd }}
+            />
+          }
+          color={EVENT_COLORS.crowd}
+        />
+      </div>
+
+      {/* Charts Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Line Chart */}
+        <div className="lg:col-span-2 rounded-2xl glass-panel p-6 border border-[rgba(255,255,255,0.08)]">
+          <div className="mb-4">
+            <h2 className="text-lg font-bold text-ow-light/90">
+              Alerts Over Time
+            </h2>
+            <p className="text-xs text-ow-mist/50">
+              Trend for selected time range
+            </p>
+          </div>
+
+          {timeSeriesLoading ? (
+            <div className="h-64 flex items-center justify-center">
+              <div className="text-center">
+                <div className="w-8 h-8 rounded-full border-2 border-ow-mist/20 border-t-ow-teal animate-spin mx-auto mb-2" />
+                <p className="text-xs text-ow-mist/50">Loading chart...</p>
+              </div>
+            </div>
+          ) : chartData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart
+                data={chartData}
+                margin={{ top: 5, right: 30, left: 0, bottom: 5 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                <XAxis
+                  dataKey="time"
+                  tick={{ fill: "rgba(255,255,255,0.4)", fontSize: 12 }}
+                  stroke="rgba(255,255,255,0.1)"
+                />
+                <YAxis
+                  tick={{ fill: "rgba(255,255,255,0.4)", fontSize: 12 }}
+                  stroke="rgba(255,255,255,0.1)"
+                />
+                <Tooltip content={<CustomTooltip />} />
+                <Line
+                  type="monotone"
+                  dataKey="count"
+                  stroke="#52c9a8"
+                  dot={{ fill: "#52c9a8", r: 4 }}
+                  activeDot={{ r: 6 }}
+                  strokeWidth={2}
+                  isAnimationActive
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-64 flex items-center justify-center">
+              <p className="text-sm text-ow-mist/50">No data available</p>
+            </div>
+          )}
+        </div>
+
+        {/* Pie Chart */}
+        <div className="rounded-2xl glass-panel p-6 border border-[rgba(255,255,255,0.08)]">
+          <div className="mb-4">
+            <h2 className="text-lg font-bold text-ow-light/90">
+              Event Distribution
+            </h2>
+            <p className="text-xs text-ow-mist/50">By event type</p>
+          </div>
+
+          {distributionLoading ? (
+            <div className="h-64 flex items-center justify-center">
+              <div className="text-center">
+                <div className="w-8 h-8 rounded-full border-2 border-ow-mist/20 border-t-ow-teal animate-spin mx-auto mb-2" />
+                <p className="text-xs text-ow-mist/50">Loading chart...</p>
+              </div>
+            </div>
+          ) : distributionChartData.length > 0 &&
+            distributionChartData.some((d) => d.value > 0) ? (
+            <ResponsiveContainer width="100%" height={280}>
               <PieChart>
                 <Pie
-                  data={distData}
+                  data={distributionChartData}
                   cx="50%"
                   cy="50%"
                   innerRadius={60}
                   outerRadius={90}
+                  paddingAngle={2}
                   dataKey="value"
-                  stroke="none"
+                  label={({ name, value }) => `${name}: ${value}`}
+                  labelLine={false}
                 >
-                  {distData.map((_, i) => (
-                    <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                  {distributionChartData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.fill} />
                   ))}
                 </Pie>
-                <Tooltip
-                  contentStyle={{
-                    background: "rgba(6,30,41,0.95)",
-                    border: "1px solid rgba(43,212,168,0.15)",
-                    borderRadius: "12px",
-                    color: "#F3F4F4",
-                    fontSize: "12px",
-                  }}
-                />
+                <Tooltip />
               </PieChart>
             </ResponsiveContainer>
           ) : (
-            <div className="flex items-center justify-center h-[250px] text-ow-mist/25 text-sm">No data</div>
-          )}
-          <div className="flex flex-wrap gap-4 mt-2 justify-center">
-            {distData.map((d, i) => (
-              <div key={d.name} className="flex items-center gap-2 text-xs">
-                <span className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
-                <span className="text-ow-mist/50">{d.name}: {d.value}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Pipeline performance bar chart */}
-        <div className="rounded-2xl glass-panel p-5">
-          <h3 className="text-sm font-semibold text-ow-mist/70 uppercase tracking-wider mb-4">Pipeline Performance</h3>
-          {pipelineData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={pipelineData}>
-                <XAxis dataKey="name" stroke="#ffffff30" fontSize={11} tickLine={false} />
-                <YAxis stroke="#ffffff30" fontSize={11} tickLine={false} />
-                <Tooltip
-                  contentStyle={{
-                    background: "rgba(6,30,41,0.95)",
-                    border: "1px solid rgba(43,212,168,0.15)",
-                    borderRadius: "12px",
-                    color: "#F3F4F4",
-                    fontSize: "12px",
-                  }}
-                />
-                <Bar dataKey="processed" fill="#2BD4A8" radius={[6, 6, 0, 0]} name="Items Processed" />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="flex items-center justify-center h-[280px] text-ow-mist/25 text-sm">No metrics</div>
+            <div className="h-64 flex items-center justify-center">
+              <p className="text-sm text-ow-mist/50">No data available</p>
+            </div>
           )}
         </div>
       </div>
 
-      {/* Queue status */}
-      <div className="rounded-2xl glass-panel p-5">
-        <h3 className="text-sm font-semibold text-ow-mist/70 uppercase tracking-wider mb-4">Queue Status</h3>
-        {queueData.length > 0 ? (
-          <ResponsiveContainer width="100%" height={200}>
-            <RadialBarChart cx="50%" cy="50%" innerRadius="20%" outerRadius="90%" data={queueData}>
-              <RadialBar dataKey="value" cornerRadius={8} />
-              <Tooltip
-                contentStyle={{
-                  background: "rgba(6,30,41,0.95)",
-                  border: "1px solid rgba(43,212,168,0.15)",
-                  borderRadius: "12px",
-                  color: "#F3F4F4",
-                  fontSize: "12px",
-                }}
-              />
-            </RadialBarChart>
-          </ResponsiveContainer>
+      {/* Recent Activity */}
+      <div className="rounded-2xl glass-panel p-6 border border-[rgba(255,255,255,0.08)]">
+        <div className="flex items-center gap-2 mb-4">
+          <Activity size={20} className="text-ow-teal/70" />
+          <h2 className="text-lg font-bold text-ow-light/90">Recent Activity</h2>
+        </div>
+
+        {recentLoading ? (
+          <div className="py-4 text-center">
+            <div className="w-6 h-6 rounded-full border-2 border-ow-mist/20 border-t-ow-teal animate-spin mx-auto mb-2" />
+            <p className="text-xs text-ow-mist/50">Loading alerts...</p>
+          </div>
+        ) : recentAlertsData?.data && recentAlertsData.data.length > 0 ? (
+          <div className="space-y-2">
+            {recentAlertsData.data.map((alert) => (
+              <RecentAlertItem key={alert.id} alert={alert} />
+            ))}
+          </div>
         ) : (
-          <div className="flex items-center justify-center h-[200px] text-ow-mist/25 text-sm">No queue data</div>
+          <div className="py-8 text-center">
+            <p className="text-sm text-ow-mist/50">
+              No recent alerts in this time range
+            </p>
+          </div>
         )}
       </div>
 
-      {/* Video Upload Section */}
-      <VideoUpload />
-    </div>
-  );
-}
-
-function VideoUpload() {
-  const [status, setStatus] = useState<"idle" | "uploading" | "done" | "error">("idle");
-  const [result, setResult] = useState<string>("");
-  const fileRef = useRef<HTMLInputElement>(null);
-
-  const handleUpload = async () => {
-    const file = fileRef.current?.files?.[0];
-    if (!file) return;
-
-    setStatus("uploading");
-    setResult("");
-
-    try {
-      const formData = new FormData();
-      formData.append("video", file);
-
-      const res = await fetch("http://127.0.0.1:8000/upload-video", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!res.ok) throw new Error("Upload failed");
-      const data = await res.json();
-      setResult(JSON.stringify(data, null, 2));
-      setStatus("done");
-    } catch {
-      setResult("Upload failed or endpoint not available.");
-      setStatus("error");
-    }
-  };
-
-  return (
-    <div className="rounded-2xl glass-panel p-6">
-      <div className="flex items-center gap-3 mb-4">
-        <BarChart3 className="w-5 h-5 text-ow-accent" />
-        <h3 className="text-sm font-semibold text-ow-mist/70 uppercase tracking-wider">Video Upload Demo</h3>
+      {/* Footer note */}
+      <div className="rounded-lg bg-ow-teal/5 border border-ow-teal/20 p-3">
+        <p className="text-xs text-ow-mist/60">
+          <span className="font-semibold text-ow-teal/80">Auto-refresh:</span>{" "}
+          Data updates every 5 seconds. All queries use SQL aggregation for
+          optimal performance.
+        </p>
       </div>
-      <div className="flex items-center gap-4">
-        <input
-          ref={fileRef}
-          type="file"
-          accept="video/*"
-          className="text-sm text-ow-mist/50 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0
-                     file:text-sm file:font-medium file:bg-ow-accent/10 file:text-ow-accent
-                     hover:file:bg-ow-accent/20 file:cursor-pointer file:transition-colors"
-        />
-        <button
-          onClick={handleUpload}
-          disabled={status === "uploading"}
-          className="flex items-center gap-2 px-5 py-2 rounded-xl bg-gradient-to-r from-ow-accent to-ow-accent-dim
-                     text-sm font-semibold text-ow-bg hover:shadow-glow-hover transition-all
-                     disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {status === "uploading" ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : status === "done" ? (
-            <CheckCircle className="w-4 h-4" />
-          ) : (
-            <Upload className="w-4 h-4" />
-          )}
-          {status === "uploading" ? "Processing..." : "Upload Video"}
-        </button>
-      </div>
-      {result && (
-        <pre className="mt-4 p-4 rounded-xl bg-ow-bg/50 border border-[rgba(255,255,255,0.04)] text-xs text-ow-mist/50 font-mono overflow-x-auto">
-          {result}
-        </pre>
-      )}
     </div>
   );
 }

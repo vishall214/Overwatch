@@ -4,11 +4,14 @@ OVERWATCH — Capture Worker
 Background worker that reads frames from the video source
 and places them into the frame queue for downstream processing.
 
+Supports multiple video source types (camera, demo, upload) through
+the SourceManager abstraction.
+
 Designed to run in a dedicated thread to avoid blocking
 the asyncio event loop with OpenCV I/O operations.
 
 Architecture:
-    VideoService.read_frame() → FramePacket → frame_queue
+    SourceManager.read() → FramePacket → frame_queue
 """
 
 import logging
@@ -19,6 +22,7 @@ from typing import Optional
 
 from app.config import Settings
 from app.core.queues import PipelineQueues, FramePacket
+from app.services.source_manager import SourceManager
 from app.services.video_service import VideoService
 
 logger = logging.getLogger(__name__)
@@ -29,13 +33,16 @@ class CaptureWorker:
     Reads video frames in a background thread and feeds them
     into the pipeline's frame queue.
 
+    Supports multiple source types through SourceManager.
     Handles frame skipping based on configuration to reduce
     processing load on CPU-constrained systems.
 
     Attributes:
         _settings: Application configuration.
-        _video_service: Video capture service instance.
+        _video_service: Video capture service instance (backward compat).
+        _source_manager: Unified source abstraction for frame reading.
         _queues: Pipeline queues for inter-worker communication.
+        _behavior_worker: Optional reference for state reset on source change.
         _thread: Background thread handle.
         _is_running: Whether the worker is actively capturing.
         _frame_count: Total frames read.
@@ -46,18 +53,23 @@ class CaptureWorker:
         settings: Settings,
         video_service: VideoService,
         queues: PipelineQueues,
+        behavior_worker: Optional[object] = None,
     ) -> None:
         """
         Initialize the CaptureWorker.
 
         Args:
             settings: Application configuration.
-            video_service: Service for reading video frames.
+            video_service: Service for reading video frames (legacy).
             queues: Pipeline queues container.
+            behavior_worker: Optional reference to behavior worker for
+                           state reset on source switching.
         """
         self._settings: Settings = settings
         self._video_service: VideoService = video_service
         self._queues: PipelineQueues = queues
+        self._behavior_worker: Optional[object] = behavior_worker
+        self._source_manager: SourceManager = SourceManager()
         self._thread: Optional[threading.Thread] = None
         self._is_running: bool = False
         self._frame_count: int = 0
@@ -68,11 +80,16 @@ class CaptureWorker:
         """
         Start the capture worker in a background thread.
 
-        The thread runs the _capture_loop method continuously
-        until stop() is called.
+        Initializes the default camera source and runs the _capture_loop
+        continuously until stop() is called.
         """
         if self._is_running:
             logger.warning("CaptureWorker already running")
+            return
+
+        # Initialize default camera source
+        if not self._source_manager.set_source("camera"):
+            logger.error("Failed to initialize default camera source")
             return
 
         self._is_running = True
@@ -85,15 +102,17 @@ class CaptureWorker:
             daemon=True,
         )
         self._thread.start()
-        logger.info("CaptureWorker started")
+        logger.info("CaptureWorker started with camera source")
 
     def stop(self) -> None:
         """
         Stop the capture worker and wait for the thread to finish.
 
-        Blocks until the background thread exits.
+        Releases the current source and blocks until the background
+        thread exits.
         """
         self._is_running = False
+        self._source_manager.release()
         if self._thread is not None:
             self._thread.join(timeout=5.0)
             self._thread = None
@@ -103,7 +122,7 @@ class CaptureWorker:
         """
         Main capture loop running in a background thread.
 
-        Reads frames from the video source, applies frame skipping,
+        Reads frames from SourceManager, applies frame skipping,
         wraps frames in FramePackets, and enqueues them. Drops frames
         if the queue is full to prevent backpressure.
         """
@@ -115,10 +134,10 @@ class CaptureWorker:
         while self._is_running:
             try:
                 start_time = time.monotonic()
-                frame = self._video_service.read_frame()
+                ret, frame = self._source_manager.read()
                 capture_time_ms = (time.monotonic() - start_time) * 1000
 
-                if frame is None:
+                if not ret or frame is None:
                     time.sleep(0.01)
                     continue
 
@@ -162,7 +181,67 @@ class CaptureWorker:
 
         logger.info("Capture loop exited")
 
-    @property
+    def switch_source(
+        self, source_type: str, path: Optional[str] = None
+    ) -> bool:
+        """
+        Switch to a different video source.
+
+        Changes the active source and resets event state in the
+        behavior worker to avoid stale detections from previous source.
+
+        Args:
+            source_type: One of "camera", "demo", or "upload".
+            path: File path for demo/upload sources, None for camera.
+
+        Returns:
+            bool: True if source switch was successful.
+        """
+        try:
+            if self._source_manager.set_source(source_type, path):
+                logger.info(
+                    "Source switched to %s (%s)",
+                    source_type,
+                    path or "default",
+                )
+
+                # Reset event state to prevent stale detections
+                if self._behavior_worker is not None:
+                    try:
+                        if hasattr(self._behavior_worker, "reset_event_state"):
+                            self._behavior_worker.reset_event_state()
+                            logger.info("Event state reset after source switch")
+                    except Exception as e:
+                        logger.error("Error resetting event state: %s", e)
+
+                return True
+            else:
+                logger.error("Failed to switch source to %s", source_type)
+                return False
+
+        except Exception as e:
+            logger.error("Error switching source: %s", e)
+            return False
+
+    def set_behavior_worker(self, behavior_worker: object) -> None:
+        """
+        Set the behavior worker reference for state reset on source changes.
+
+        Args:
+            behavior_worker: Reference to the BehaviorWorker instance.
+        """
+        self._behavior_worker = behavior_worker
+
+    def get_source_info(self) -> dict:
+        """
+        Get information about the current source.
+
+        Returns:
+            dict: Source information including type, path, and status.
+        """
+        info = self._source_manager.info
+        info["is_capturing"] = self._is_running
+        return info
     def is_running(self) -> bool:
         """Return whether the capture worker is active."""
         return self._is_running

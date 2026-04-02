@@ -35,6 +35,24 @@ from app.utils.geometry_utils import point_in_polygon, bbox_center, rect_interse
 
 logger = logging.getLogger(__name__)
 
+# ── Event state engine constants ─────────────────────────────────
+# Minimum consecutive frames before an event is considered stable
+STABILITY_THRESHOLDS: dict[str, int] = {
+    "intrusion": 3,
+    "crowd": 5,
+    # loitering is already time-based — no frame threshold needed
+}
+
+# Seconds before a new alert of the same (event_type, zone) can fire
+COOLDOWN_SECONDS: dict[str, float] = {
+    "intrusion": 15.0,
+    "loitering": 20.0,
+    "crowd": 25.0,
+}
+
+# Seconds after last detection before an event state entry is purged
+EVENT_STATE_TTL: float = 45.0
+
 
 class BehaviorWorker:
     """
@@ -104,6 +122,12 @@ class BehaviorWorker:
         self._avg_behavior_ms: float = 0.0
         self._avg_input_age_ms: float = 0.0
 
+        # ── Event state engine ───────────────────────────────────
+        # Keyed by event_key = "{event_type}_{zone_id}_{track_id}"
+        # Value: {"first_seen": float, "last_seen": float,
+        #         "stable_count": int, "last_alert_time": float}
+        self._event_states: dict[str, dict] = {}
+
     def start(self) -> None:
         """Start the behavior worker in a background thread."""
         if self._is_running:
@@ -125,6 +149,7 @@ class BehaviorWorker:
         self._face_match_alerted.clear()
         self._identity_cache.clear()
         self._pending_tracks.clear()
+        self._event_states.clear()
         self._drop_count = 0
         self._avg_behavior_ms = 0.0
         self._avg_input_age_ms = 0.0
@@ -163,6 +188,25 @@ class BehaviorWorker:
             "BehaviorWorker stopped (analyzed %d frames)", self._analyze_count,
         )
 
+    def reset_event_state(self) -> None:
+        """
+        Clear all event and detection state.
+
+        Called when the video source changes so that stale
+        intrusion/loitering/crowd state from a previous source
+        does not carry over.
+        """
+        self._active_intrusions.clear()
+        self._loiter_state.clear()
+        self._loiter_alerted.clear()
+        self._crowd_alerted = False
+        self._crowd_alerted_zones.clear()
+        self._event_states.clear()
+        self._face_match_alerted.clear()
+        self._identity_cache.clear()
+        self._pending_tracks.clear()
+        logger.info("BehaviorWorker event state reset")
+
     def _publish_event(self, event: Event) -> None:
         """Publish an event to the bus from a worker thread."""
         if self._event_loop is not None and self._event_loop.is_running():
@@ -172,6 +216,62 @@ class BehaviorWorker:
             )
         else:
             logger.debug("No event loop available, skipping event publish")
+
+    # ── Event state engine helpers ───────────────────────────────
+
+    @staticmethod
+    def _make_event_key(event_type: str, zone_id: str, track_id: int = 0) -> str:
+        """Build a unique key for the event state dict.
+
+        Key format: ``{event_type}_{zone_id}_{track_id}``
+        """
+        return f"{event_type}_{zone_id}_{track_id}"
+
+    def _update_event_state(
+        self, event_key: str, now: float,
+    ) -> dict:
+        """Insert or update an event state entry and return it."""
+        state = self._event_states.get(event_key)
+        if state is None:
+            state = {
+                "first_seen": now,
+                "last_seen": now,
+                "stable_count": 1,
+                "last_alert_time": 0.0,
+            }
+            self._event_states[event_key] = state
+        else:
+            state["last_seen"] = now
+            state["stable_count"] += 1
+        return state
+
+    def _should_trigger_alert(
+        self, event_type: str, state: dict, now: float,
+    ) -> bool:
+        """Check both stability threshold and cooldown for an event.
+
+        Returns True only when:
+        1. ``stable_count >= STABILITY_THRESHOLDS[event_type]``  (default 1)
+        2. ``now - last_alert_time >= COOLDOWN_SECONDS[event_type]``
+        """
+        threshold = STABILITY_THRESHOLDS.get(event_type, 1)
+        if state["stable_count"] < threshold:
+            return False
+
+        cooldown = COOLDOWN_SECONDS.get(event_type, 15.0)
+        if state["last_alert_time"] > 0 and (now - state["last_alert_time"]) < cooldown:
+            return False
+
+        return True
+
+    def _cleanup_stale_events(self, now: float) -> None:
+        """Remove event state entries unseen for longer than EVENT_STATE_TTL."""
+        stale_keys = [
+            k for k, v in self._event_states.items()
+            if (now - v["last_seen"]) > EVENT_STATE_TTL
+        ]
+        for k in stale_keys:
+            del self._event_states[k]
 
     def _face_worker_loop(self) -> None:
         """Background thread: dequeue person crops, run InsightFace, update caches."""
@@ -299,9 +399,13 @@ class BehaviorWorker:
                             if is_person:
                                 people_in_zone += 1
 
+                            # -- Intrusion (legacy) --
                             if _mod["intrusion"]:
                                 intrusion_detected = True
-                                if track_id not in self._active_intrusions:
+                                ekey = self._make_event_key("intrusion", "A", track_id)
+                                state = self._update_event_state(ekey, now)
+                                if self._should_trigger_alert("intrusion", state, now):
+                                    state["last_alert_time"] = now
                                     self._active_intrusions.add(track_id)
                                     event_data = {
                                         "track_id": track_id,
@@ -321,6 +425,7 @@ class BehaviorWorker:
                             else:
                                 self._active_intrusions.discard(track_id)
 
+                            # -- Loitering (legacy) --
                             if _mod["loitering"]:
                                 if track_id not in self._loiter_state:
                                     self._loiter_state[track_id] = now
@@ -328,7 +433,10 @@ class BehaviorWorker:
                                 loiter_timers[track_id] = duration
                                 if duration >= self._loiter_threshold:
                                     loitering_detected = True
-                                    if track_id not in self._loiter_alerted:
+                                    ekey = self._make_event_key("loitering", "A", track_id)
+                                    state = self._update_event_state(ekey, now)
+                                    if self._should_trigger_alert("loitering", state, now):
+                                        state["last_alert_time"] = now
                                         self._loiter_alerted.add(track_id)
                                         loiter_event = {
                                             "track_id": track_id, "duration": round(duration, 1),
@@ -359,10 +467,13 @@ class BehaviorWorker:
                             if is_person:
                                 people_per_zone[zone_id] = people_per_zone.get(zone_id, 0) + 1
 
+                            # -- Intrusion (user zone) --
                             if zone_type == "intrusion" and _mod["intrusion"]:
                                 intrusion_detected = True
-                                intrusion_key = (track_id, zone_id)
-                                if track_id not in self._active_intrusions:
+                                ekey = self._make_event_key("intrusion", str(zone_id), track_id)
+                                state = self._update_event_state(ekey, now)
+                                if self._should_trigger_alert("intrusion", state, now):
+                                    state["last_alert_time"] = now
                                     self._active_intrusions.add(track_id)
                                     event_data = {
                                         "track_id": track_id, "zone": zone_name,
@@ -379,6 +490,7 @@ class BehaviorWorker:
                                         )
                                     logger.warning("INTRUSION: %s #%d entered %s", obj.get("class_name", "unknown"), track_id, zone_name)
 
+                            # -- Loitering (user zone) --
                             if zone_type == "loitering" and _mod["loitering"]:
                                 if track_id not in self._loiter_state:
                                     self._loiter_state[track_id] = now
@@ -386,7 +498,10 @@ class BehaviorWorker:
                                 loiter_timers[track_id] = duration
                                 if duration >= self._loiter_threshold:
                                     loitering_detected = True
-                                    if track_id not in self._loiter_alerted:
+                                    ekey = self._make_event_key("loitering", str(zone_id), track_id)
+                                    state = self._update_event_state(ekey, now)
+                                    if self._should_trigger_alert("loitering", state, now):
+                                        state["last_alert_time"] = now
                                         self._loiter_alerted.add(track_id)
                                         loiter_event = {
                                             "track_id": track_id, "duration": round(duration, 1),
@@ -408,11 +523,14 @@ class BehaviorWorker:
                         self._loiter_state.pop(track_id, None)
                         self._loiter_alerted.discard(track_id)
 
-                # --- Crowd detection -----------------------------------
+                # --- Crowd detection (event-state-driven) ---------------
                 if use_legacy:
                     if _mod["crowd"] and people_in_zone > self._crowd_threshold:
                         crowd_detected = True
-                        if not self._crowd_alerted:
+                        ekey = self._make_event_key("crowd", "A", 0)
+                        state = self._update_event_state(ekey, now)
+                        if self._should_trigger_alert("crowd", state, now):
+                            state["last_alert_time"] = now
                             self._crowd_alerted = True
                             crowd_event = {
                                 "count": people_in_zone, "threshold": self._crowd_threshold,
@@ -437,7 +555,10 @@ class BehaviorWorker:
                         zone_name = zone.get("name", f"Zone {zid}")
                         if _mod["crowd"] and z_count > self._crowd_threshold:
                             crowd_detected = True
-                            if zid not in self._crowd_alerted_zones:
+                            ekey = self._make_event_key("crowd", str(zid), 0)
+                            state = self._update_event_state(ekey, now)
+                            if self._should_trigger_alert("crowd", state, now):
+                                state["last_alert_time"] = now
                                 self._crowd_alerted_zones.add(zid)
                                 crowd_event = {
                                     "count": z_count, "threshold": self._crowd_threshold,
@@ -460,6 +581,9 @@ class BehaviorWorker:
                     self._loiter_state.pop(tid, None)
                     self._loiter_alerted.discard(tid)
                     self._active_intrusions.discard(tid)
+
+                # Clean up stale event states (memory leak prevention)
+                self._cleanup_stale_events(now)
 
                 # --- Face recognition (disabled when enable_face_recognition=False) ---
                 face_results: list[dict] = []
@@ -775,4 +899,5 @@ class BehaviorWorker:
             "frames_dropped": self._drop_count,
             "face_queue_depth": self._face_queue.qsize(),
             "pending_face_tracks": len(self._pending_tracks),
+            "active_event_states": len(self._event_states),
         }
