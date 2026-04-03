@@ -146,6 +146,14 @@ class VideoPipeline:
             if not face_ok:
                 logger.warning("Face recognition model failed to load — running without face ID")
 
+        # ── Load weapon detection model (blocking I/O → executor) ──
+        if self._settings.enable_weapon_detection and not self._detection_service.weapon_is_loaded:
+            weapon_ok = await loop.run_in_executor(
+                None, self._detection_service.load_weapon_model,
+            )
+            if not weapon_ok:
+                logger.warning("Weapon detection model failed to load — running without weapon detection")
+
         # ── Clear stale data from previous run ──────────────────
         self._queues.clear_all()
 

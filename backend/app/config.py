@@ -50,7 +50,7 @@ class Settings(BaseSettings):
 
     # ── Detection Classes ────────────────────────────────────────
     # COCO class IDs to detect (0=person)
-    detection_classes: list[int] = [0]
+    detection_classes: list[int] = [0, 56, 67]
 
     # ── Debug ────────────────────────────────────────────────────
     debug_detection_logs: bool = False
@@ -80,6 +80,15 @@ class Settings(BaseSettings):
     loiter_threshold: float = 10.0  # Seconds inside zone before loitering alert
     crowd_threshold: int = 5  # Number of persons in zone before crowd alert
 
+    # ── Weapon / Dangerous Object Detection ──────────────────────
+    enable_weapon_detection: bool = True
+    weapon_model: str = "yolov8n.pt"  # Uses same pretrained COCO model
+    weapon_confidence: float = 0.2
+    weapon_skip_frames: int = 3  # Run weapon inference every N frames
+    weapon_consecutive_threshold: int = 2  # Consecutive detections before alert
+    weapon_cooldown_seconds: float = 10.0  # Seconds between alerts for same object
+    weapon_classes: list[int] = [43, 76]  # COCO classes: 43=knife
+
     model_config = {
         "env_prefix": "OVERWATCH_",
         "env_file": ".env",
@@ -96,3 +105,8 @@ def get_settings() -> Settings:
         Settings: Application configuration loaded from environment.
     """
     return Settings()
+
+
+
+
+

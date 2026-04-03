@@ -10,6 +10,7 @@ import {
   Home,
   PanelLeftClose,
   PanelLeft,
+  Crosshair,
 } from "lucide-react";
 
 const links = [
@@ -18,6 +19,7 @@ const links = [
   { to: "/intrusion", label: "Intrusion", icon: ShieldAlert },
   { to: "/loitering", label: "Loitering", icon: Eye },
   { to: "/crowd", label: "Crowd", icon: Users },
+  { to: "/weapons", label: "Weapons", icon: Crosshair },
   { to: "/alerts", label: "Alerts", icon: Bell },
   { to: "/analytics", label: "Analytics", icon: BarChart3 },
 ];

@@ -183,6 +183,23 @@ class InferenceWorker:
                 # Run detection
                 start_time = time.monotonic()
                 result = self._detection_service.detect(packet.frame)
+
+                # Weapon detection runs on a configurable cadence to limit overhead.
+                weapon_detections_list = None
+                if (
+                    self._detection_service.weapon_is_loaded
+                    and packet.frame_index % self._settings.weapon_skip_frames == 0
+                ):
+                    weapon_results = self._detection_service.detect_weapons(packet.frame)
+                    weapon_detections_list = [d.to_dict() for d in weapon_results]
+                    if weapon_detections_list:
+                        logger.info(
+                            "weapon candidates frame=%d count=%d labels=%s",
+                            packet.frame_index,
+                            len(weapon_detections_list),
+                            [w.get("class_name", "unknown") for w in weapon_detections_list],
+                        )
+
                 inference_ms = (time.monotonic() - start_time) * 1000
 
                 # Update rolling average
@@ -215,6 +232,11 @@ class InferenceWorker:
                         "detection_count": len(result.detections),
                         "detections": detection_dicts,
                         "inference_ms": round(inference_ms, 1),
+                        "weapon_count": (
+                            len(weapon_detections_list)
+                            if weapon_detections_list is not None
+                            else 0
+                        ),
                     },
                 ))
 
@@ -227,6 +249,7 @@ class InferenceWorker:
                     timestamp_ns=packet.timestamp_ns,
                     capture_time_ms=packet.capture_time_ms,
                     inference_time_ms=round(inference_ms, 1),
+                    weapon_detections=weapon_detections_list,
                 )
 
                 try:

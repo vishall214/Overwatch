@@ -19,7 +19,7 @@ from typing import Dict
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_MODULES: frozenset = frozenset({"intrusion", "loitering", "crowd"})
+SUPPORTED_MODULES: frozenset = frozenset({"intrusion", "loitering", "crowd", "weapon_detection"})
 
 
 class ModuleController:
@@ -37,6 +37,7 @@ class ModuleController:
             "intrusion": True,
             "loitering": True,
             "crowd": True,
+            "weapon_detection": True,
         }
         logger.info(
             "ModuleController initialized — all modules enabled by default",

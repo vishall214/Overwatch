@@ -19,4 +19,5 @@ export interface AlertStats {
   loitering: number;
   crowd: number;
   face_match: number;
+  dangerous_object: number;
 }

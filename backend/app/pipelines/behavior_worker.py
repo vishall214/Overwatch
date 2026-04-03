@@ -99,6 +99,12 @@ class BehaviorWorker:
         self._drop_count: int = 0
         self._avg_behavior_ms: float = 0.0
         self._avg_input_age_ms: float = 0.0
+        # ── Weapon / Dangerous Object State ──────────────────────
+        self._weapon_state: dict[str, dict] = {}
+        self._weapon_cooldown: dict[str, float] = {}
+        self._weapon_consecutive_threshold: int = settings.weapon_consecutive_threshold
+        self._weapon_cooldown_seconds: float = settings.weapon_cooldown_seconds
+        self._active_weapon_alerts: list[dict] = []  # For drawing on current frame
 
     def start(self) -> None:
         """Start the behavior worker in a background thread."""
@@ -122,6 +128,9 @@ class BehaviorWorker:
         self._pending_tracks.clear()
         self._drop_count = 0
         self._avg_behavior_ms = 0.0
+        self._weapon_state.clear()
+        self._weapon_cooldown.clear()
+        self._active_weapon_alerts.clear()
         self._avg_input_age_ms = 0.0
         # Drain any stale items from the face queue
         while not self._face_queue.empty():
@@ -450,6 +459,15 @@ class BehaviorWorker:
                             del self._identity_cache[tid]
                     self._pending_tracks -= (self._pending_tracks - current_track_ids)
 
+                # --- Weapon / Dangerous Object Handling ---------------
+                weapon_detected = False
+                if _mod.get("weapon_detection", True):
+                    weapon_dets = getattr(packet, 'weapon_detections', None)
+                    if weapon_dets is not None:
+                        weapon_detected = self._handle_weapon_detections(
+                            weapon_dets, now, packet.frame, behavior_events,
+                        )
+
                 # --- Draw zone overlay and alerts ---------------------
                 annotated = self._draw_zone_overlay(
                     packet.annotated_frame,
@@ -458,10 +476,18 @@ class BehaviorWorker:
                     crowd_detected,
                     people_in_zone,
                     loiter_timers,
+                    weapon_detected=(weapon_detected or bool(self._active_weapon_alerts)),
                 )
 
                 # --- Draw face identity overlays ----------------------
                 annotated = self._draw_face_overlays(annotated, face_results)
+
+                # --- Draw weapon overlays LAST (highest priority) ------
+                # Rendered after all other overlays to ensure weapon
+                # bounding boxes and banners are always on top.
+                if weapon_detected or self._active_weapon_alerts:
+                    annotated = self._draw_weapon_overlays(annotated)
+
                 behavior_time_ms = (time.monotonic() - start_time) * 1000
 
                 behavior_packet = BehaviorPacket(
@@ -528,6 +554,7 @@ class BehaviorWorker:
         crowd_detected: bool,
         people_in_zone: int,
         loiter_timers: dict[int, float],
+        weapon_detected: bool = False,
     ) -> np.ndarray:
         """
         Draw the intrusion zone polygon, loiter timers, crowd count, and alert text.
@@ -563,8 +590,18 @@ class BehaviorWorker:
             cv2.FONT_HERSHEY_SIMPLEX, 0.5, zone_colour, 1,
         )
 
-        # Intrusion alert
+        # Alert text priority: weapon > intrusion > loitering > crowd
         y_offset = 30
+
+        # Weapon alert (highest priority — rendered first at top)
+        if weapon_detected:
+            cv2.putText(
+                annotated, "!! WEAPON DETECTED !!", (10, y_offset),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2,
+            )
+            y_offset += 35
+
+        # Intrusion alert
         if intrusion_detected:
             cv2.putText(
                 annotated, "INTRUSION DETECTED", (10, y_offset),
@@ -659,6 +696,186 @@ class BehaviorWorker:
                     frame, conf_label, (x1, y2 + 36),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, colour, 1,
                 )
+
+        return frame
+
+    def _handle_weapon_detections(
+        self,
+        weapon_dets: list[dict],
+        now: float,
+        frame: np.ndarray,
+        behavior_events: list[dict],
+    ) -> bool:
+        """
+        Process weapon detections with temporal filtering and cooldown.
+
+        Uses a grid-based key (class_name + approximate bbox center) to
+        track the same weapon across frames. Only fires an alert after
+        the weapon is detected in at least `weapon_consecutive_threshold`
+        consecutive detection passes, with a configurable cooldown period
+        between repeated alerts for the same object.
+
+        Args:
+            weapon_dets: List of weapon detection dicts from the current frame.
+                         Empty list means detection ran but found nothing.
+            now: Current monotonic time.
+            frame: Current video frame for snapshot capture.
+            behavior_events: Mutable list to append behavior event dicts to.
+
+        Returns:
+            bool: True if any weapon alert was triggered this frame.
+        """
+        alert_fired = False
+        seen_keys: set[str] = set()
+
+        for det in weapon_dets:
+            class_name = det.get("class_name", "unknown")
+            bbox = det.get("bbox", [0, 0, 0, 0])
+            confidence = det.get("confidence", 0.0)
+            cx = (bbox[0] + bbox[2]) / 2
+            cy = (bbox[1] + bbox[3]) / 2
+            # Grid center to 50px cells for approximate spatial matching
+            gx = int(cx // 50)
+            gy = int(cy // 50)
+            key = f"{class_name}_{gx}_{gy}"
+            seen_keys.add(key)
+
+            if key not in self._weapon_state:
+                self._weapon_state[key] = {
+                    "count": 0,
+                    "confidence": 0.0,
+                    "class_name": class_name,
+                    "bbox": bbox,
+                }
+
+            state = self._weapon_state[key]
+            state["count"] += 1
+            state["confidence"] = confidence
+            state["bbox"] = bbox
+
+            # Check if consecutive threshold is met
+            if state["count"] >= self._weapon_consecutive_threshold:
+                # Check cooldown
+                last_alert_time = self._weapon_cooldown.get(key, 0.0)
+                if now - last_alert_time > self._weapon_cooldown_seconds:
+                    self._weapon_cooldown[key] = now
+                    alert_fired = True
+
+                    weapon_event = {
+                        "event_type": "dangerous_object",
+                        "object_type": class_name,
+                        "confidence": round(confidence, 3),
+                        "bbox": bbox,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+                    behavior_events.append(weapon_event)
+
+                    self._publish_event(Event(
+                        type="DangerousObjectDetected",
+                        data=weapon_event,
+                    ))
+
+                    if self._alert_service is not None:
+                        self._alert_service.create_alert(
+                            event_type="dangerous_object",
+                            track_id=None,
+                            zone="",
+                            metadata=weapon_event,
+                            frame=frame,
+                        )
+
+                    logger.warning(
+                        "DANGEROUS OBJECT: %s detected (confidence=%.2f, "
+                        "consecutive=%d, key=%s)",
+                        class_name,
+                        confidence,
+                        state["count"],
+                        key,
+                    )
+
+        # Reset counters for weapon keys NOT seen this frame
+        stale_keys = set(self._weapon_state.keys()) - seen_keys
+        for k in stale_keys:
+            self._weapon_state[k]["count"] = 0
+
+        # Update active weapon alerts snapshot for drawing
+        self._active_weapon_alerts = [
+            s for s in self._weapon_state.values()
+            if s["count"] >= self._weapon_consecutive_threshold
+        ]
+
+        # Clean up stale entries that have been zero for a while
+        self._weapon_state = {
+            k: v for k, v in self._weapon_state.items() if v["count"] > 0
+        }
+
+        return alert_fired
+
+    def _draw_weapon_overlays(
+        self,
+        frame: np.ndarray,
+    ) -> np.ndarray:
+        """
+        Draw weapon detection bounding boxes and alert text on the frame.
+
+        Draws a red bounding box around each detected weapon along with
+        a class label and confidence score. Also renders a prominent
+        "WEAPON DETECTED" banner at the top of the frame.
+
+        Args:
+            frame: Annotated frame (will be modified in-place).
+
+        Returns:
+            np.ndarray: Frame with weapon overlays drawn.
+        """
+        if not self._active_weapon_alerts:
+            return frame
+
+        # Draw "WEAPON DETECTED" banner
+        h, w = frame.shape[:2]
+        cv2.rectangle(frame, (0, h - 45), (w, h), (0, 0, 180), -1)
+        cv2.putText(
+            frame,
+            "!! WEAPON DETECTED !!",
+            (w // 2 - 160, h - 15),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.9,
+            (255, 255, 255),
+            2,
+        )
+
+        for alert in self._active_weapon_alerts:
+            bbox = alert["bbox"]
+            x1, y1, x2, y2 = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
+            class_name = alert["class_name"]
+            confidence = alert["confidence"]
+
+            # Red bounding box with thicker border
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 3)
+
+            # Two-line label: "WEAPON" header + "Knife (0.87)" detail
+            line1 = "WEAPON"
+            line2 = f"{class_name.capitalize()} ({confidence:.2f})"
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            (tw1, th1), _ = cv2.getTextSize(line1, font, 0.7, 2)
+            (tw2, th2), _ = cv2.getTextSize(line2, font, 0.55, 1)
+            label_w = max(tw1, tw2) + 12
+            label_h = th1 + th2 + 20
+
+            # Label background
+            cv2.rectangle(
+                frame, (x1, y1 - label_h), (x1 + label_w, y1), (0, 0, 255), -1,
+            )
+            # Line 1: "WEAPON" (bold white)
+            cv2.putText(
+                frame, line1, (x1 + 4, y1 - th2 - 14),
+                font, 0.7, (255, 255, 255), 2,
+            )
+            # Line 2: "Knife (0.87)" (lighter white)
+            cv2.putText(
+                frame, line2, (x1 + 4, y1 - 5),
+                font, 0.55, (255, 220, 220), 1,
+            )
 
         return frame
 

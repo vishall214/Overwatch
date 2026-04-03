@@ -10,6 +10,7 @@ import Dashboard from "./pages/Dashboard";
 import Intrusion from "./pages/Intrusion";
 import Loitering from "./pages/Loitering";
 import Crowd from "./pages/Crowd";
+import Weapons from "./pages/Weapons";
 import Alerts from "./pages/Alerts";
 import Analytics from "./pages/Analytics";
 import Login from "./pages/Login";
@@ -49,6 +50,7 @@ function AppLayout() {
           <Route path="/intrusion" element={<Intrusion />} />
           <Route path="/loitering" element={<Loitering />} />
           <Route path="/crowd" element={<Crowd />} />
+          <Route path="/weapons" element={<Weapons />} />
           <Route path="/alerts" element={<Alerts />} />
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/login" element={<Login />} />

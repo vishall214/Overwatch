@@ -211,6 +211,7 @@ class TrackingWorker:
                     capture_time_ms=packet.capture_time_ms,
                     inference_time_ms=packet.inference_time_ms,
                     tracking_time_ms=round(tracking_time_ms, 1),
+                    weapon_detections=packet.weapon_detections,
                 )
 
                 try:

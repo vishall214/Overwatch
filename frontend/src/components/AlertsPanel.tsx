@@ -2,12 +2,14 @@ import { useEffect, useRef } from "react";
 import gsap from "gsap";
 import { useAlerts } from "../hooks/useAlerts";
 import { API } from "../api/config";
-import { AlertTriangle, ShieldAlert, Users, Eye } from "lucide-react";
+import { AlertTriangle, ShieldAlert, Users, Eye, Crosshair, UserCheck } from "lucide-react";
 
 const eventConfig: Record<string, { icon: typeof AlertTriangle; color: string }> = {
   intrusion: { icon: ShieldAlert, color: "text-ow-alert-intrusion" },
   loitering: { icon: Eye, color: "text-ow-alert-loitering" },
   crowd: { icon: Users, color: "text-ow-alert-crowd" },
+  dangerous_object: { icon: Crosshair, color: "text-red-500" },
+  face_match: { icon: UserCheck, color: "text-ow-accent" },
 };
 
 export default function AlertsPanel() {
@@ -42,21 +44,39 @@ export default function AlertsPanel() {
 
   const alerts = data?.alerts ?? [];
 
+  // Priority sort: weapon > intrusion > loitering > crowd > other
+  const priority: Record<string, number> = {
+    dangerous_object: 0,
+    intrusion: 1,
+    loitering: 2,
+    crowd: 3,
+  };
+  const sorted = [...alerts].sort((a, b) => {
+    const pa = priority[a.event_type] ?? 9;
+    const pb = priority[b.event_type] ?? 9;
+    if (pa !== pb) return pa - pb;
+    return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
+  });
+
   return (
-    <GlassCard title="Alerts" badge={alerts.length}>
+    <GlassCard title="Alerts" badge={sorted.length}>
       <div ref={listRef} className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
-        {alerts.length === 0 ? (
+        {sorted.length === 0 ? (
           <div className="text-center text-ow-mist/30 text-sm py-6">No alerts detected</div>
         ) : (
-          alerts.map((alert) => {
+          sorted.map((alert) => {
             const cfg = eventConfig[alert.event_type] ?? { icon: AlertTriangle, color: "text-ow-accent" };
             const Icon = cfg.icon;
             const snapshotFile = alert.snapshot_path?.split("/").pop() ?? "";
+            const isWeapon = alert.event_type === "dangerous_object";
             return (
               <div
                 key={alert.id}
-                className="alert-card flex items-start gap-3 p-3 rounded-xl bg-ow-teal/8 border border-[rgba(255,255,255,0.05)]
-                           hover:bg-ow-teal/15 hover:border-ow-accent/15 transition-all duration-200 cursor-default group"
+                className={`alert-card flex items-start gap-3 p-3 rounded-xl transition-all duration-200 cursor-default group ${
+                  isWeapon
+                    ? "bg-red-500/10 border-2 border-red-500/30 hover:bg-red-500/15 hover:border-red-500/50 shadow-[0_0_12px_rgba(239,68,68,0.15)]"
+                    : "bg-ow-teal/8 border border-[rgba(255,255,255,0.05)] hover:bg-ow-teal/15 hover:border-ow-accent/15"
+                }`}
               >
                 {snapshotFile && (
                   <img
@@ -69,10 +89,23 @@ export default function AlertsPanel() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <Icon className={`w-3.5 h-3.5 ${cfg.color}`} />
-                    <span className="text-sm font-medium capitalize text-ow-light/90">{alert.event_type}</span>
+                    <span className="text-sm font-medium capitalize text-ow-light/90">
+                      {alert.event_type === "dangerous_object" ? "Weapon" : alert.event_type}
+                    </span>
+                    {alert.event_type === "dangerous_object" && typeof alert.metadata?.object_type === "string" ? (
+                      <span className="px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-400 text-[9px] font-bold uppercase">
+                        {alert.metadata.object_type}
+                      </span>
+                    ) : null}
                   </div>
                   <div className="text-xs text-ow-mist/50 mt-0.5">
-                    Zone: {alert.zone || "—"} &middot; Track {alert.track_id ?? "—"}
+                    {alert.event_type === "dangerous_object"
+                      ? `Confidence: ${
+                          typeof alert.metadata?.confidence === "number"
+                            ? `${(Number(alert.metadata.confidence) * 100).toFixed(0)}%`
+                            : "—"
+                        }`
+                      : `Zone: ${alert.zone || "—"} · Track ${alert.track_id ?? "—"}`}
                   </div>
                   <div className="text-[10px] text-ow-mist/25 mt-1 font-mono">
                     {new Date(alert.timestamp).toLocaleTimeString()}

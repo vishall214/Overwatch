@@ -14,8 +14,8 @@ maximum sizes to prevent memory buildup and backpressure.
 
 import logging
 import queue
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, Optional
 
 import numpy as np
 
@@ -59,6 +59,7 @@ class DetectionPacket:
     timestamp_ns: int
     capture_time_ms: float = 0.0
     inference_time_ms: float = 0.0
+    weapon_detections: Optional[list[dict[str, Any]]] = None
 
 
 @dataclass
@@ -82,6 +83,7 @@ class TrackingPacket:
     capture_time_ms: float = 0.0
     inference_time_ms: float = 0.0
     tracking_time_ms: float = 0.0
+    weapon_detections: Optional[list[dict[str, Any]]] = None
 
 
 @dataclass

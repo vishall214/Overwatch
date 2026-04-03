@@ -12,6 +12,7 @@ const DEFAULT_MODULES: ModulesState = {
   intrusion: true,
   loitering: true,
   crowd: true,
+  weapon_detection: true,
 };
 
 export default function Topbar({ collapsed }: { collapsed: boolean }) {

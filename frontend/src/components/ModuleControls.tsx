@@ -1,12 +1,13 @@
 import { useRef, useEffect } from "react";
 import gsap from "gsap";
 import { useModules, useToggleModule } from "../hooks/useModules";
-import { ShieldAlert, Eye, Users } from "lucide-react";
+import { ShieldAlert, Eye, Users, Crosshair } from "lucide-react";
 
 const moduleConfig = [
   { name: "intrusion", label: "Intrusion Detection", icon: ShieldAlert, color: "text-ow-alert-intrusion" },
   { name: "loitering", label: "Loitering Detection", icon: Eye, color: "text-ow-alert-loitering" },
   { name: "crowd", label: "Crowd Detection", icon: Users, color: "text-ow-alert-crowd" },
+  { name: "weapon_detection", label: "Weapon Detection", icon: Crosshair, color: "text-red-500" },
 ] as const;
 
 export default function ModuleControls() {

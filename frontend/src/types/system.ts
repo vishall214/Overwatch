@@ -2,6 +2,7 @@ export interface ModulesState {
   intrusion: boolean;
   loitering: boolean;
   crowd: boolean;
+  weapon_detection: boolean;
 }
 
 export interface SystemStatus {

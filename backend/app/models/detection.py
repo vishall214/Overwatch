@@ -26,6 +26,7 @@ class Detection:
     confidence: float
     class_id: int
     class_name: str
+    detection_type: str = "object"
 
     def to_dict(self) -> dict[str, Any]:
         """
@@ -39,6 +40,7 @@ class Detection:
             "confidence": round(self.confidence, 3),
             "class_id": self.class_id,
             "class_name": self.class_name,
+            "type": self.detection_type,
         }
 
 
