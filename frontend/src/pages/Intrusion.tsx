@@ -47,7 +47,7 @@ export default function Intrusion() {
         <div className="lg:col-span-2">
           <SourceSelector moduleType="intrusion" />
           <div className="h-[50vh] min-h-[350px]">
-            <CameraFeed />
+            <CameraFeed moduleType="intrusion" />
           </div>
         </div>
         <AlertsPanel />

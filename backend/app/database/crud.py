@@ -5,12 +5,15 @@ Functions for creating and querying alert records.
 """
 
 from datetime import datetime, timedelta, timezone
+import logging
 from typing import Optional
 
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from .models import AlertRow, FaceRow, Zone, User
+
+logger = logging.getLogger(__name__)
 
 
 def create_alert_row(
@@ -99,6 +102,15 @@ def create_zone(
     camera_id: str = "default",
 ) -> Zone:
     """Insert a new zone and return it."""
+    logger.info(
+        "ZONE DB INSERT REQUEST: type=%s x=%.4f y=%.4f w=%.4f h=%.4f camera_id=%s",
+        zone_type,
+        x,
+        y,
+        width,
+        height,
+        camera_id,
+    )
     row = Zone(
         name=name,
         type=zone_type,
@@ -111,6 +123,15 @@ def create_zone(
     db.add(row)
     db.commit()
     db.refresh(row)
+    logger.info(
+        "ZONE DB INSERTED: id=%d type=%s x=%.4f y=%.4f w=%.4f h=%.4f",
+        row.id,
+        row.type,
+        row.x,
+        row.y,
+        row.width,
+        row.height,
+    )
     return row
 
 

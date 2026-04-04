@@ -18,14 +18,17 @@ import cv2
 import logging
 import os
 from typing import Optional
+from urllib.parse import urlparse
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# Base directories (relative to backend working directory)
-DEMO_VIDEOS_DIR = os.path.join("assets", "videos")
-UPLOADS_DIR = "uploads"
+# Base directories (absolute, independent of process working directory)
+BACKEND_ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+WORKSPACE_ROOT_DIR = os.path.abspath(os.path.join(BACKEND_ROOT_DIR, ".."))
+DEMO_VIDEOS_DIR = os.path.join(BACKEND_ROOT_DIR, "assets", "videos")
+UPLOADS_DIR = os.path.join(BACKEND_ROOT_DIR, "uploads")
 
 
 class SourceManager:
@@ -49,6 +52,36 @@ class SourceManager:
         self.source_path: Optional[str] = None
         self.source_name: str = "None"
         self.current_source: Optional[cv2.VideoCapture] = None
+
+    @staticmethod
+    def _is_stream_uri(path: str) -> bool:
+        """Return True when the input looks like a network stream URI."""
+        scheme = urlparse(path).scheme.lower()
+        return scheme in {"rtsp", "http", "https", "rtmp"}
+
+    @staticmethod
+    def _resolve_existing_local_path(path: str) -> Optional[str]:
+        """
+        Resolve an existing local file path.
+
+        Tries both the provided path and a backend-root-relative fallback.
+        """
+        candidate = os.path.normpath(path)
+        if os.path.isfile(candidate):
+            return candidate
+
+        if not os.path.isabs(candidate):
+            rooted = os.path.normpath(os.path.join(BACKEND_ROOT_DIR, candidate))
+            if os.path.isfile(rooted):
+                return rooted
+
+            workspace_rooted = os.path.normpath(
+                os.path.join(WORKSPACE_ROOT_DIR, candidate)
+            )
+            if os.path.isfile(workspace_rooted):
+                return workspace_rooted
+
+        return None
 
     def set_source(self, source_type: str, path: Optional[str] = None) -> bool:
         """
@@ -79,34 +112,51 @@ class SourceManager:
         if source_type in ["demo", "upload"] and path is None:
             raise ValueError(f"{source_type} source requires a path")
 
-        # Validate file exists for file-based sources
+        resolved_path = path
         if source_type in ["demo", "upload"]:
-            if not os.path.isfile(path):
-                raise FileNotFoundError(f"Unsupported source path: {path}")
+            assert path is not None
+            if self._is_stream_uri(path):
+                resolved_path = path
+            else:
+                local_path = self._resolve_existing_local_path(path)
+                if local_path is None:
+                    raise FileNotFoundError(f"Unsupported source path: {path}")
+                resolved_path = local_path
 
         self.source_type = source_type
-        self.source_path = path
+        self.source_path = resolved_path
 
         try:
             if source_type == "camera":
-                self.current_source = cv2.VideoCapture(0)
+                camera_index = 0
+                if path is not None and str(path).strip() != "":
+                    try:
+                        camera_index = int(str(path).strip())
+                    except ValueError:
+                        logger.warning("Invalid camera index '%s', falling back to index 0", path)
+
+                self.current_source = cv2.VideoCapture(camera_index)
                 if not self.current_source.isOpened():
-                    logger.error("Failed to open camera (index 0)")
+                    logger.error("Failed to open camera (index %d)", camera_index)
                     self.current_source = None
                     return False
-                self.source_name = "Live Camera"
-                logger.info("Camera source initialized")
+                self.source_name = f"Live Camera ({camera_index})"
+                logger.info("Camera source initialized (index=%d)", camera_index)
 
             elif source_type in ["demo", "upload"]:
-                self.current_source = cv2.VideoCapture(path)
+                self.current_source = cv2.VideoCapture(resolved_path)
                 if not self.current_source.isOpened():
-                    logger.error("Failed to open %s video: %s", source_type, path)
+                    logger.error("Failed to open %s video: %s", source_type, resolved_path)
                     self.current_source = None
                     return False
                 label = "Demo" if source_type == "demo" else "Upload"
-                self.source_name = f"{label}: {os.path.basename(path)}"
+                source_display = (
+                    resolved_path if self._is_stream_uri(str(resolved_path))
+                    else os.path.basename(str(resolved_path))
+                )
+                self.source_name = f"{label}: {source_display}"
                 logger.info(
-                    "%s source initialized: %s", label, path
+                    "%s source initialized: %s", label, resolved_path
                 )
 
             return True
@@ -152,9 +202,12 @@ class SourceManager:
         if source_type == "upload":
             if not path:
                 raise ValueError("Upload source requires a path")
-            if not os.path.isfile(path):
+            if self._is_stream_uri(path):
+                return path
+            resolved = self._resolve_existing_local_path(path)
+            if resolved is None:
                 raise FileNotFoundError(f"Uploaded video not found: {path}")
-            return path
+            return resolved
 
         raise ValueError(f"Unknown source type: {source_type}")
 

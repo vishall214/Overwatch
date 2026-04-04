@@ -20,6 +20,8 @@ import threading
 import time
 from typing import Optional
 
+import cv2
+
 from app.config import Settings
 from app.core.queues import PipelineQueues, FramePacket
 from app.services.source_manager import SourceManager
@@ -87,9 +89,25 @@ class CaptureWorker:
             logger.warning("CaptureWorker already running")
             return
 
-        # Initialize default camera source
-        if not self._source_manager.set_source("camera"):
-            logger.error("Failed to initialize default camera source")
+        source_info = self._video_service.source_info
+        configured_source = str(
+            source_info.get("source", self._settings.video_source)
+        ).strip()
+
+        # Mirror the already-selected pipeline source into SourceManager.
+        if configured_source.isdigit() or configured_source == "":
+            init_type = "camera"
+            init_path: Optional[str] = configured_source if configured_source else "0"
+        else:
+            init_type = "upload"
+            init_path = configured_source
+
+        if not self._source_manager.set_source(init_type, init_path):
+            logger.error(
+                "Failed to initialize capture source (type=%s, path=%s)",
+                init_type,
+                init_path,
+            )
             return
 
         self._is_running = True
@@ -102,7 +120,11 @@ class CaptureWorker:
             daemon=True,
         )
         self._thread.start()
-        logger.info("CaptureWorker started with camera source")
+        logger.info(
+            "CaptureWorker started with %s source (%s)",
+            init_type,
+            init_path or "default",
+        )
 
     def stop(self) -> None:
         """
@@ -122,20 +144,27 @@ class CaptureWorker:
         """
         Main capture loop running in a background thread.
 
-        Reads frames from SourceManager, applies frame skipping,
+        Reads frames from SourceManager,
         wraps frames in FramePackets, and enqueues them. Drops frames
         if the queue is full to prevent backpressure.
         """
-        skip_count = self._settings.pipeline_skip_frames
         frame_index = 0
 
-        logger.info("Capture loop started (skip_frames=%d)", skip_count)
+        logger.info("Capture loop started")
 
         while self._is_running:
+            loop_start = time.time()
             try:
                 start_time = time.monotonic()
                 ret, frame = self._source_manager.read()
                 capture_time_ms = (time.monotonic() - start_time) * 1000
+
+                print("FRAME READ TIME:", time.time())
+                cap = self._source_manager.current_source
+                fps = cap.get(cv2.CAP_PROP_FPS) if cap is not None else 0.0
+                source_frame_index = int(cap.get(cv2.CAP_PROP_POS_FRAMES)) if cap is not None else -1
+                print("VIDEO FPS:", fps)
+                print("FRAME INDEX:", source_frame_index)
 
                 if not ret or frame is None:
                     time.sleep(0.01)
@@ -150,10 +179,6 @@ class CaptureWorker:
                     )
 
                 frame_index += 1
-
-                # Frame skipping: only process every (skip_count)th frame
-                if skip_count > 1 and (frame_index % skip_count) != 0:
-                    continue
 
                 packet = FramePacket(
                     frame=frame,
@@ -175,9 +200,20 @@ class CaptureWorker:
                     self._frame_count += 1
                     logger.debug("Frame queue full, replaced oldest with frame %d", frame_index)
 
+                # For file-backed sources, pace reads to source FPS to avoid CPU-speed playback.
+                source_type = self._source_manager.source_type
+                if source_type in {"demo", "upload"} and fps > 0:
+                    frame_delay = 1.0 / fps
+                    elapsed = time.time() - loop_start
+                    if elapsed < frame_delay:
+                        time.sleep(frame_delay - elapsed)
+
             except Exception:
                 logger.exception("Error in capture loop")
                 time.sleep(0.1)
+            finally:
+                loop_end = time.time()
+                print("LOOP DURATION:", loop_end - loop_start)
 
         logger.info("Capture loop exited")
 
@@ -208,8 +244,13 @@ class CaptureWorker:
                 # Reset event state to prevent stale detections
                 if self._behavior_worker is not None:
                     try:
-                        if hasattr(self._behavior_worker, "reset_event_state"):
-                            self._behavior_worker.reset_event_state()
+                        reset_event_state = getattr(
+                            self._behavior_worker,
+                            "reset_event_state",
+                            None,
+                        )
+                        if callable(reset_event_state):
+                            reset_event_state()
                             logger.info("Event state reset after source switch")
                     except Exception as e:
                         logger.error("Error resetting event state: %s", e)
@@ -231,6 +272,10 @@ class CaptureWorker:
             behavior_worker: Reference to the BehaviorWorker instance.
         """
         self._behavior_worker = behavior_worker
+
+    def clear_source_state(self) -> None:
+        """Clear source metadata so the pipeline can return to a no-source state."""
+        self._source_manager.clear()
 
     def get_source_info(self) -> dict:
         """

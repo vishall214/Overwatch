@@ -100,6 +100,7 @@ class VideoPipeline:
         self._stream_worker: Optional[StreamWorker] = None
 
         self._is_running: bool = False
+        self._active_module: Optional[str] = None
 
     async def start(self, source: Optional[str] = None) -> bool:
         """
@@ -245,7 +246,12 @@ class VideoPipeline:
 
         logger.info("Video pipeline stopped (processed %d frames)", frames_processed)
 
-    def switch_source(self, source_type: str, path: Optional[str] = None) -> bool:
+    def switch_source(
+        self,
+        source_type: str,
+        path: Optional[str] = None,
+        module: Optional[str] = None,
+    ) -> bool:
         """
         Switch to a different video source during pipeline runtime.
 
@@ -267,12 +273,43 @@ class VideoPipeline:
             logger.error("CaptureWorker not initialized")
             return False
 
+        if module:
+            self._active_module = module
+
+        print("ACTIVE MODULE:", self._active_module)
+        print("SOURCE TYPE:", source_type)
+
         return self._capture_worker.switch_source(source_type, path)
+
+    def set_active_module(self, module: Optional[str]) -> None:
+        """Set active module metadata for source ownership diagnostics."""
+        self._active_module = module
+
+    def reset_source_to_default(self) -> None:
+        """Reset source metadata after active-source deletion."""
+        self._active_module = None
+        self._video_service.set_source(self._settings.video_source)
+        if self._capture_worker is not None:
+            self._capture_worker.clear_source_state()
 
     @property
     def is_running(self) -> bool:
         """Return whether the pipeline is actively processing."""
         return self._is_running
+
+    @property
+    def current_source_info(self) -> dict:
+        """Return source metadata from the active capture worker when available."""
+        if self._capture_worker is not None:
+            try:
+                info = self._capture_worker.get_source_info()
+                info["active_module"] = self._active_module
+                return info
+            except Exception:
+                logger.exception("Failed reading source info from capture worker")
+        fallback_info = dict(self._video_service.source_info)
+        fallback_info["active_module"] = self._active_module
+        return fallback_info
 
     @property
     def stats(self) -> dict:

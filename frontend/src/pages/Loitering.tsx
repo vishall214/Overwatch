@@ -47,7 +47,7 @@ export default function Loitering() {
         <div className="lg:col-span-2">
           <SourceSelector moduleType="loitering" />
           <div className="h-[50vh] min-h-[350px]">
-            <CameraFeed />
+            <CameraFeed moduleType="loitering" />
           </div>
         </div>
         <AlertsPanel />

@@ -6,11 +6,16 @@ export interface AuthResponse {
 }
 
 export async function signup(email: string, password: string): Promise<AuthResponse> {
-  const res = await fetch(API.auth.signup, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
+  let res: Response;
+  try {
+    res = await fetch(API.auth.signup, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+  } catch {
+    throw new Error("Cannot reach backend API. Make sure backend is running on port 8000.");
+  }
 
   if (!res.ok) {
     const payload = await res.json().catch(() => ({}));
@@ -21,11 +26,16 @@ export async function signup(email: string, password: string): Promise<AuthRespo
 }
 
 export async function login(email: string, password: string): Promise<AuthResponse> {
-  const res = await fetch(API.auth.login, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
+  let res: Response;
+  try {
+    res = await fetch(API.auth.login, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+  } catch {
+    throw new Error("Cannot reach backend API. Make sure backend is running on port 8000.");
+  }
 
   if (!res.ok) {
     const payload = await res.json().catch(() => ({}));

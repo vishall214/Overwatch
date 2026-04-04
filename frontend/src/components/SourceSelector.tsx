@@ -1,7 +1,7 @@
-import React, { useState, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { switchSource, listDemoVideos, uploadVideo } from "../api/video";
-import { AlertCircle, Check, Loader, Upload, Video } from "lucide-react";
+import { switchSource, listDemoVideos, uploadVideo, deleteUploadedVideo } from "../api/video";
+import { AlertCircle, Check, Loader, Trash2, Upload, Video } from "lucide-react";
 
 interface SourceSelectorProps {
   moduleType: "intrusion" | "loitering" | "crowd";
@@ -11,8 +11,14 @@ interface SourceSelectorProps {
 export default function SourceSelector({ moduleType, onSourceChanged }: SourceSelectorProps) {
   const [selectedMode, setSelectedMode] = useState<"demo" | "upload" | "live" | null>(null);
   const [selectedDemo, setSelectedDemo] = useState<string>("");
+  const [uploadedFilename, setUploadedFilename] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadProgress,  setUploadProgress] = useState(0);
+
+  useEffect(() => {
+    console.log("UPLOADED STATE:", uploadedFilename);
+  }, [uploadedFilename]);
 
   // Fetch demo videos for this module
   const { data: demoList, isLoading: demoLoading } = useQuery({
@@ -26,9 +32,23 @@ export default function SourceSelector({ moduleType, onSourceChanged }: SourceSe
     mutationFn: switchSource,
     onSuccess: () => {
       onSourceChanged?.();
-      setSelectedMode(null);
       setSelectedDemo("");
       setUploadProgress(0);
+    },
+  });
+
+  const deleteUploadMutation = useMutation({
+    mutationFn: (filename: string) => deleteUploadedVideo(filename),
+    onSuccess: () => {
+      setUploadedFilename(null);
+      setUploadError(null);
+      setSelectedMode(null);
+      setSelectedDemo("");
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+      setUploadProgress(0);
+      onSourceChanged?.();
     },
   });
 
@@ -36,8 +56,10 @@ export default function SourceSelector({ moduleType, onSourceChanged }: SourceSe
   const handleDemoSelect = async (videoName: string) => {
     setSelectedDemo(videoName);
     try {
+      console.log("SWITCH SOURCE:", { type: "demo", module: moduleType, name: videoName });
       await switchMutation.mutateAsync({
         type: "demo",
+        module: moduleType,
         name: videoName,
         category: moduleType,
       });
@@ -52,26 +74,51 @@ export default function SourceSelector({ moduleType, onSourceChanged }: SourceSe
     if (!file) return;
 
     try {
+      if (file.size > 200 * 1024 * 1024) {
+        throw new Error("File too large. Max allowed size is 200MB.");
+      }
+
+      setUploadError(null);
       setUploadProgress(50);
       const uploadResponse = await uploadVideo(file);
+      console.log("UPLOAD RESPONSE:", uploadResponse);
+      setUploadedFilename(uploadResponse.filename);
       setUploadProgress(75);
 
+      console.log("SWITCH SOURCE:", { type: "upload", module: moduleType });
       await switchMutation.mutateAsync({
         type: "upload",
+        module: moduleType,
         path: uploadResponse.path,
       });
       setUploadProgress(100);
     } catch (error) {
       console.error("Failed to upload video:", error);
       setUploadProgress(0);
+      setUploadError((error as Error).message || "Failed to upload video");
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  };
+
+  const handleDeleteUpload = async () => {
+    if (!uploadedFilename) return;
+
+    try {
+      await deleteUploadMutation.mutateAsync(uploadedFilename);
+    } catch (error) {
+      console.error("Failed to delete uploaded video:", error);
     }
   };
 
   // Handle live camera
   const handleLiveCamera = async () => {
     try {
+      console.log("SWITCH SOURCE:", { type: "camera", module: moduleType });
       await switchMutation.mutateAsync({
         type: "camera",
+        module: moduleType,
       });
     } catch (error) {
       console.error("Failed to switch to camera:", error);
@@ -154,18 +201,38 @@ export default function SourceSelector({ moduleType, onSourceChanged }: SourceSe
             <input
               ref={fileInputRef}
               type="file"
-              accept=".mp4,.avi,.mkv,.mov,.flv,.webm"
+              accept=".mp4,.avi"
               onChange={handleFileSelect}
               className="hidden"
             />
             <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={switchMutation.isPending || uploadProgress > 0}
+              onClick={() => {
+                if (fileInputRef.current) {
+                  fileInputRef.current.value = "";
+                  fileInputRef.current.click();
+                }
+              }}
+              disabled={switchMutation.isPending || deleteUploadMutation.isPending || uploadProgress > 0}
               className="w-full px-3 py-2 rounded-lg bg-ow-bg/40 border border-dashed border-ow-mist/20 text-ow-mist/60 hover:border-ow-teal/40 hover:text-ow-teal/60 text-sm transition-colors disabled:opacity-50"
             >
               {uploadProgress > 0 ? `Uploading... ${uploadProgress}%` : "Choose Video File"}
             </button>
-            <p className="text-xs text-ow-mist/40">Max 500MB • MP4, AVI, MKV, MOV, FLV, WebM</p>
+
+            {uploadedFilename && (
+              <div className="flex items-center justify-between gap-2 rounded-lg border border-[rgba(255,255,255,0.08)] bg-ow-bg/30 px-3 py-2">
+                <p className="text-xs text-ow-mist/60 truncate">Uploaded: {uploadedFilename}</p>
+                <button
+                  onClick={handleDeleteUpload}
+                  disabled={deleteUploadMutation.isPending || switchMutation.isPending}
+                  className="inline-flex items-center gap-1 rounded-md border border-red-500/30 bg-red-500/10 px-2 py-1 text-[11px] text-red-300 hover:bg-red-500/20 disabled:opacity-50"
+                >
+                  {deleteUploadMutation.isPending ? <Loader size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                  {deleteUploadMutation.isPending ? "Removing..." : "Remove"}
+                </button>
+              </div>
+            )}
+
+            <p className="text-xs text-ow-mist/40">Max 200MB • MP4, AVI</p>
           </div>
         )}
 
@@ -177,10 +244,31 @@ export default function SourceSelector({ moduleType, onSourceChanged }: SourceSe
           </div>
         )}
 
+        {uploadError && (
+          <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-ow-alert-intrusion/10 border border-ow-alert-intrusion/20">
+            <AlertCircle size={14} className="text-ow-alert-intrusion/60 mt-0.5 flex-shrink-0" />
+            <p className="text-xs text-ow-alert-intrusion/60">{uploadError}</p>
+          </div>
+        )}
+
         {switchMutation.isSuccess && (
           <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-ow-teal/10 border border-ow-teal/20">
             <Check size={14} className="text-ow-teal/60 mt-0.5 flex-shrink-0" />
             <p className="text-xs text-ow-teal/60">Source switched successfully</p>
+          </div>
+        )}
+
+        {deleteUploadMutation.error && (
+          <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-ow-alert-intrusion/10 border border-ow-alert-intrusion/20">
+            <AlertCircle size={14} className="text-ow-alert-intrusion/60 mt-0.5 flex-shrink-0" />
+            <p className="text-xs text-ow-alert-intrusion/60">{(deleteUploadMutation.error as Error).message}</p>
+          </div>
+        )}
+
+        {deleteUploadMutation.isSuccess && (
+          <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-ow-teal/10 border border-ow-teal/20">
+            <Check size={14} className="text-ow-teal/60 mt-0.5 flex-shrink-0" />
+            <p className="text-xs text-ow-teal/60">Uploaded video removed</p>
           </div>
         )}
       </div>

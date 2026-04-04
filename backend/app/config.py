@@ -54,6 +54,7 @@ class Settings(BaseSettings):
 
     # ── Debug ────────────────────────────────────────────────────
     debug_detection_logs: bool = False
+    debug_zone_logs: bool = True
 
     # ── Streaming ────────────────────────────────────────────────
     stream_quality: int = 80  # JPEG encode quality (1-100)

@@ -378,6 +378,27 @@ class BehaviorWorker:
                 use_legacy = len(user_zones) == 0
 
                 frame_h, frame_w = packet.frame.shape[:2]
+                zone_debug_enabled = self._settings.debug_zone_logs
+                should_log_zone_frame = zone_debug_enabled and (packet.frame_index % 30 == 0)
+
+                if should_log_zone_frame:
+                    logger.info(
+                        "ZONE DEBUG FRAME: frame=%d frame_w=%d frame_h=%d zones=%s",
+                        packet.frame_index,
+                        frame_w,
+                        frame_h,
+                        [
+                            {
+                                "id": z.get("id"),
+                                "type": z.get("type"),
+                                "x": round(float(z.get("x", 0.0)), 4),
+                                "y": round(float(z.get("y", 0.0)), 4),
+                                "w": round(float(z.get("width", 0.0)), 4),
+                                "h": round(float(z.get("height", 0.0)), 4),
+                            }
+                            for z in user_zones
+                        ],
+                    )
 
                 # Per-zone counters for crowd detection
                 people_per_zone: dict[int, int] = {}
@@ -385,6 +406,27 @@ class BehaviorWorker:
                 # --- Check each tracked object against zones ----------
                 for obj in packet.tracked_objects:
                     bbox = obj["bbox"]
+                    det_bbox_norm = [
+                        bbox[0] / frame_w,
+                        bbox[1] / frame_h,
+                        bbox[2] / frame_w,
+                        bbox[3] / frame_h,
+                    ]
+
+                    if should_log_zone_frame:
+                        logger.info(
+                            "DETECTION BBOX: track=%d bbox_px=[%.1f, %.1f, %.1f, %.1f] bbox_norm=[%.4f, %.4f, %.4f, %.4f]",
+                            obj["track_id"],
+                            bbox[0],
+                            bbox[1],
+                            bbox[2],
+                            bbox[3],
+                            det_bbox_norm[0],
+                            det_bbox_norm[1],
+                            det_bbox_norm[2],
+                            det_bbox_norm[3],
+                        )
+
                     center = bbox_center(bbox)
                     track_id = obj["track_id"]
                     current_track_ids.add(track_id)
@@ -457,7 +499,42 @@ class BehaviorWorker:
                     else:
                         # ---------- User-defined rectangular zones ----------
                         for zone in user_zones:
-                            if not rect_intersects_bbox(zone, bbox, frame_w, frame_h):
+                            zone_bbox_px = [
+                                zone["x"] * frame_w,
+                                zone["y"] * frame_h,
+                                (zone["x"] + zone["width"]) * frame_w,
+                                (zone["y"] + zone["height"]) * frame_h,
+                            ]
+                            intersects = rect_intersects_bbox(zone, bbox, frame_w, frame_h)
+
+                            if should_log_zone_frame:
+                                logger.info(
+                                    "ZONE: id=%d type=%s bbox_norm=[%.4f, %.4f, %.4f, %.4f] bbox_px=[%.1f, %.1f, %.1f, %.1f]",
+                                    zone["id"],
+                                    zone["type"],
+                                    zone["x"],
+                                    zone["y"],
+                                    zone["x"] + zone["width"],
+                                    zone["y"] + zone["height"],
+                                    zone_bbox_px[0],
+                                    zone_bbox_px[1],
+                                    zone_bbox_px[2],
+                                    zone_bbox_px[3],
+                                )
+                                logger.info(
+                                    "INTERSECTION INPUTS: zone_bbox_px=[%.1f, %.1f, %.1f, %.1f] detection_bbox_px=[%.1f, %.1f, %.1f, %.1f] intersects=%s",
+                                    zone_bbox_px[0],
+                                    zone_bbox_px[1],
+                                    zone_bbox_px[2],
+                                    zone_bbox_px[3],
+                                    bbox[0],
+                                    bbox[1],
+                                    bbox[2],
+                                    bbox[3],
+                                    intersects,
+                                )
+
+                            if not intersects:
                                 continue
                             in_any_zone = True
                             zone_name = zone.get("name", f"Zone {zone['id']}")

@@ -47,7 +47,7 @@ export default function Crowd() {
         <div className="lg:col-span-2">
           <SourceSelector moduleType="crowd" />
           <div className="h-[50vh] min-h-[350px]">
-            <CameraFeed />
+            <CameraFeed moduleType="crowd" />
           </div>
         </div>
         <AlertsPanel />

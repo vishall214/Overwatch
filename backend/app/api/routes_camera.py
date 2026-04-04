@@ -7,9 +7,10 @@ Endpoints for camera pipeline control and MJPEG streaming.
 import asyncio
 import logging
 import queue
+import time
 from typing import AsyncIterator, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from app.config import Settings
@@ -122,7 +123,7 @@ def _get_pipeline() -> VideoPipeline:
     return _pipeline
 
 
-async def _mjpeg_generator() -> AsyncIterator[bytes]:
+async def _mjpeg_generator(stream_request_module: Optional[str] = None) -> AsyncIterator[bytes]:
     """
     Async generator that yields MJPEG multipart frames from stream_queue.
 
@@ -141,6 +142,9 @@ async def _mjpeg_generator() -> AsyncIterator[bytes]:
     if queues is None or pipeline is None:
         return
 
+    logger.info("MJPEG stream opened (module=%s)", stream_request_module or "unknown")
+    print("STREAM REQUEST MODULE:", stream_request_module)
+
     loop = asyncio.get_running_loop()
 
     while pipeline.is_running:
@@ -152,6 +156,8 @@ async def _mjpeg_generator() -> AsyncIterator[bytes]:
             )
         except queue.Empty:
             continue
+
+        print("FRAME SENT:", time.time())
 
         yield (
             b"--frame\r\n"
@@ -233,7 +239,7 @@ async def pipeline_status() -> dict:
 
 
 @router.get("/stream")
-async def mjpeg_stream() -> StreamingResponse:
+async def mjpeg_stream(module: Optional[str] = Query(default=None)) -> StreamingResponse:
     """
     Stream the processed video feed as MJPEG.
 
@@ -248,7 +254,18 @@ async def mjpeg_stream() -> StreamingResponse:
             detail="Pipeline is not running. Start it first via POST /camera/start",
         )
 
+    source_info = pipeline.current_source_info
+    active_module = source_info.get("active_module")
+    if module and active_module and module != active_module:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Stream is active for module '{active_module}', "
+                f"not '{module}'."
+            ),
+        )
+
     return StreamingResponse(
-        _mjpeg_generator(),
+        _mjpeg_generator(module),
         media_type="multipart/x-mixed-replace; boundary=frame",
     )

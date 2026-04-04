@@ -69,9 +69,6 @@ export default function Signup() {
             <h1 className="text-3xl font-black text-ow-light mb-2">
               Signup
             </h1>
-            <p className="text-ow-mist/60 text-sm">
-              Join OVERWATCH and start monitoring in minutes
-            </p>
           </div>
 
           {/* Form */}
@@ -224,12 +221,6 @@ export default function Signup() {
         </div>
 
         {/* Footer Link */}
-        <p className="text-center text-xs text-ow-mist/40 mt-6">
-          By creating an account, you agree to our{' '}
-          <button className="text-ow-accent/60 hover:text-ow-accent transition-colors">
-            Terms of Service
-          </button>
-        </p>
       </div>
     </div>
   );

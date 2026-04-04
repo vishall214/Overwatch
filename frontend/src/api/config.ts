@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
+const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
 
 export const API = {
   auth: {
@@ -15,6 +15,7 @@ export const API = {
     source: `${API_BASE}/video/source`,
     demoList: (category: string) => `${API_BASE}/video/demo/list?type=${encodeURIComponent(category)}`,
     upload: `${API_BASE}/video/upload`,
+    deleteUpload: (filename: string) => `${API_BASE}/video/upload/${encodeURIComponent(filename)}`,
     sourceInfo: `${API_BASE}/video/source/info`,
   },
   analytics: {

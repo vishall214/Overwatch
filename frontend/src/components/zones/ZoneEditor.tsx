@@ -1,6 +1,7 @@
 import React, { useRef, useState, useCallback, useEffect } from "react";
 import { useZones } from "../../hooks/useZones";
 import type { Zone } from "../../api/zones";
+import { useCameraStream } from "../../context/CameraStreamContext";
 
 /* ── Colour scheme per zone type ── */
 const ZONE_COLOURS: Record<string, { bg: string; border: string; label: string }> = {
@@ -46,11 +47,82 @@ interface DragState {
   origH: number;
 }
 
+interface VideoViewport {
+  offsetX: number;
+  offsetY: number;
+  width: number;
+  height: number;
+  containerWidth: number;
+  containerHeight: number;
+  videoWidth: number;
+  videoHeight: number;
+  canvasWidth: number;
+  canvasHeight: number;
+}
+
+interface PointerSample {
+  normalizedX: number;
+  normalizedY: number;
+  rawX: number;
+  rawY: number;
+  inViewport: boolean;
+}
+
+const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
+
+const computeViewport = (
+  container: HTMLDivElement,
+  videoWidth: number,
+  videoHeight: number,
+): VideoViewport => {
+  const rect = container.getBoundingClientRect();
+  const containerWidth = Math.max(1, rect.width);
+  const containerHeight = Math.max(1, rect.height);
+
+  const sourceWidth = videoWidth > 0 ? videoWidth : containerWidth;
+  const sourceHeight = videoHeight > 0 ? videoHeight : containerHeight;
+
+  const sourceAspect = sourceWidth / sourceHeight;
+  const containerAspect = containerWidth / containerHeight;
+
+  let width = containerWidth;
+  let height = containerHeight;
+  let offsetX = 0;
+  let offsetY = 0;
+
+  if (containerAspect > sourceAspect) {
+    height = containerHeight;
+    width = height * sourceAspect;
+    offsetX = (containerWidth - width) / 2;
+  } else {
+    width = containerWidth;
+    height = width / sourceAspect;
+    offsetY = (containerHeight - height) / 2;
+  }
+
+  const canvas = container.parentElement?.querySelector("canvas") as HTMLCanvasElement | null;
+  const canvasRect = canvas?.getBoundingClientRect();
+
+  return {
+    offsetX,
+    offsetY,
+    width,
+    height,
+    containerWidth,
+    containerHeight,
+    videoWidth: sourceWidth,
+    videoHeight: sourceHeight,
+    canvasWidth: canvasRect?.width ?? 0,
+    canvasHeight: canvasRect?.height ?? 0,
+  };
+};
+
 /* ═══════════════════════════════════════════════════════════════ */
 /*  ZoneEditor                                                    */
 /* ═══════════════════════════════════════════════════════════════ */
 const ZoneEditor: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const { imageElement } = useCameraStream();
   const { zones, addZone, removeZone } = useZones();
 
   /* Drawing state — refs to avoid re-renders during drag */
@@ -62,31 +134,129 @@ const ZoneEditor: React.FC = () => {
 
   /* Drag / resize state (also ref-based) */
   const dragRef = useRef<DragState | null>(null);
+  const drawStartRef = useRef<{ x: number; y: number } | null>(null);
+  const drawLastRef = useRef<{ x: number; y: number } | null>(null);
   const [, forceUpdate] = useState(0);
+
+  const initialViewport: VideoViewport = {
+    offsetX: 0,
+    offsetY: 0,
+    width: 1,
+    height: 1,
+    containerWidth: 1,
+    containerHeight: 1,
+    videoWidth: 1,
+    videoHeight: 1,
+    canvasWidth: 0,
+    canvasHeight: 0,
+  };
+  const [viewport, setViewport] = useState<VideoViewport>(initialViewport);
+  const viewportRef = useRef<VideoViewport>(initialViewport);
+
+  const syncViewport = useCallback(() => {
+    if (!containerRef.current) return;
+    const next = computeViewport(
+      containerRef.current,
+      imageElement?.naturalWidth ?? 0,
+      imageElement?.naturalHeight ?? 0,
+    );
+    viewportRef.current = next;
+    setViewport(next);
+  }, [imageElement]);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    syncViewport();
+
+    const observer = new ResizeObserver(() => {
+      syncViewport();
+    });
+
+    observer.observe(containerRef.current);
+    window.addEventListener("resize", syncViewport);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", syncViewport);
+    };
+  }, [syncViewport]);
+
+  useEffect(() => {
+    console.log("ZONE VIEWPORT:", {
+      videoWidth: viewport.videoWidth,
+      videoHeight: viewport.videoHeight,
+      canvasWidth: viewport.canvasWidth,
+      canvasHeight: viewport.canvasHeight,
+      containerWidth: viewport.containerWidth,
+      containerHeight: viewport.containerHeight,
+      viewportOffsetX: viewport.offsetX,
+      viewportOffsetY: viewport.offsetY,
+      viewportWidth: viewport.width,
+      viewportHeight: viewport.height,
+    });
+  }, [viewport]);
+
+  const pointerToNormalized = useCallback((e: React.MouseEvent): PointerSample | null => {
+    const container = containerRef.current;
+    if (!container) return null;
+
+    const vp = viewportRef.current;
+    if (vp.width <= 0 || vp.height <= 0) return null;
+
+    const rect = container.getBoundingClientRect();
+    const rawX = e.clientX - rect.left;
+    const rawY = e.clientY - rect.top;
+    const localX = rawX - vp.offsetX;
+    const localY = rawY - vp.offsetY;
+    const inViewport = localX >= 0 && localX <= vp.width && localY >= 0 && localY <= vp.height;
+
+    return {
+      normalizedX: clamp01(localX / vp.width),
+      normalizedY: clamp01(localY / vp.height),
+      rawX,
+      rawY,
+      inViewport,
+    };
+  }, []);
 
   /* ── Drawing handlers ── */
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
       if (!drawMode || !containerRef.current) return;
-      const rect = containerRef.current.getBoundingClientRect();
-      const x = (e.clientX - rect.left) / rect.width;
-      const y = (e.clientY - rect.top) / rect.height;
+      const point = pointerToNormalized(e);
+      if (!point || !point.inViewport) return;
+
+      const x = point.normalizedX;
+      const y = point.normalizedY;
+
+      drawStartRef.current = { x: point.rawX, y: point.rawY };
+      drawLastRef.current = { x: point.rawX, y: point.rawY };
+
+      const vp = viewportRef.current;
+      console.log({
+        videoWidth: vp.videoWidth,
+        videoHeight: vp.videoHeight,
+        canvasWidth: vp.canvasWidth,
+        canvasHeight: vp.canvasHeight,
+      });
+
       drawRef.current = { x, y, w: 0, h: 0 };
       setIsDrawing(true);
     },
-    [drawMode],
+    [drawMode, pointerToNormalized],
   );
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent) => {
-      const container = containerRef.current;
-      if (!container) return;
-      const rect = container.getBoundingClientRect();
+      const point = pointerToNormalized(e);
+      if (!point) return;
 
       /* ---------- Drawing ---------- */
       if (isDrawing && drawRef.current) {
-        const cx = (e.clientX - rect.left) / rect.width;
-        const cy = (e.clientY - rect.top) / rect.height;
+        const cx = point.normalizedX;
+        const cy = point.normalizedY;
+        drawLastRef.current = { x: point.rawX, y: point.rawY };
         drawRef.current.w = cx - drawRef.current.x;
         drawRef.current.h = cy - drawRef.current.y;
         /* Update preview div directly — no React state during drag */
@@ -109,8 +279,8 @@ const ZoneEditor: React.FC = () => {
       /* ---------- Drag / resize ---------- */
       if (dragRef.current) {
         const ds = dragRef.current;
-        const dx = (e.clientX - rect.left) / rect.width - ds.startX;
-        const dy = (e.clientY - rect.top) / rect.height - ds.startY;
+        const dx = point.normalizedX - ds.startX;
+        const dy = point.normalizedY - ds.startY;
 
         const zone = zones.find((z) => z.id === ds.zoneId);
         if (!zone) return;
@@ -149,7 +319,7 @@ const ZoneEditor: React.FC = () => {
         forceUpdate((n) => n + 1);
       }
     },
-    [isDrawing, zones],
+    [isDrawing, pointerToNormalized, zones],
   );
 
   const handleMouseUp = useCallback(() => {
@@ -160,11 +330,36 @@ const ZoneEditor: React.FC = () => {
       const y = Math.min(d.y, d.y + d.h);
       const w = Math.abs(d.w);
       const h = Math.abs(d.h);
+
+      const drawStart = drawStartRef.current;
+      const drawEnd = drawLastRef.current;
+      const vp = viewportRef.current;
+
+      console.log("RAW DRAW:", {
+        x1: drawStart?.x ?? 0,
+        y1: drawStart?.y ?? 0,
+        x2: drawEnd?.x ?? drawStart?.x ?? 0,
+        y2: drawEnd?.y ?? drawStart?.y ?? 0,
+        containerWidth: vp.containerWidth,
+        containerHeight: vp.containerHeight,
+      });
+
+      console.log("NORMALIZED DRAW:", {
+        norm_x: x,
+        norm_y: y,
+        norm_w: w,
+        norm_h: h,
+      });
+
       // Only save zones with meaningful size
       if (w > 0.01 && h > 0.01) {
-        addZone({ type: zoneType, x, y, width: w, height: h });
+        const payload = { type: zoneType, x, y, width: w, height: h };
+        console.log("ZONE PAYLOAD:", payload);
+        addZone(payload);
       }
       drawRef.current = null;
+      drawStartRef.current = null;
+      drawLastRef.current = null;
       if (previewRef.current) previewRef.current.style.display = "none";
       setIsDrawing(false);
       setDrawMode(false);
@@ -196,20 +391,21 @@ const ZoneEditor: React.FC = () => {
     (e: React.MouseEvent, zone: Zone, type: DragState["type"]) => {
       e.stopPropagation();
       e.preventDefault();
-      if (!containerRef.current) return;
-      const rect = containerRef.current.getBoundingClientRect();
+      const point = pointerToNormalized(e);
+      if (!point) return;
+
       dragRef.current = {
         type,
         zoneId: zone.id,
-        startX: (e.clientX - rect.left) / rect.width,
-        startY: (e.clientY - rect.top) / rect.height,
+        startX: point.normalizedX,
+        startY: point.normalizedY,
         origX: zone.x,
         origY: zone.y,
         origW: zone.width,
         origH: zone.height,
       };
     },
-    [],
+    [pointerToNormalized],
   );
 
   const handleClearAll = useCallback(() => {
@@ -225,83 +421,94 @@ const ZoneEditor: React.FC = () => {
     <div
       ref={containerRef}
       className={`absolute inset-0 z-10 ${cursorClass}`}
-      style={{ pointerEvents: drawMode || dragRef.current ? "auto" : "none" }}
-      onMouseDown={handleMouseDown}
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
+      style={{ pointerEvents: "none" }}
     >
-      {/* ── Rendered zones ── */}
-      {zones.map((zone) => {
-        const col = c(zone.type);
-        return (
-          <div
-            key={zone.id}
-            className="absolute group"
-            style={{
-              left: `${zone.x * 100}%`,
-              top: `${zone.y * 100}%`,
-              width: `${zone.width * 100}%`,
-              height: `${zone.height * 100}%`,
-              background: col.bg,
-              border: `2px solid ${col.border}`,
-              boxShadow: `0 0 12px ${col.border}`,
-              pointerEvents: "auto",
-            }}
-            onMouseDown={(e) => !drawMode && startDrag(e, zone, "move")}
-          >
-            {/* Label */}
-            <span
-              className={`absolute top-0.5 left-1 text-[10px] font-mono uppercase tracking-wider select-none ${col.label}`}
-            >
-              {zone.name ?? zone.type}
-            </span>
-
-            {/* Delete button */}
-            <button
-              className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-red-600/80 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer pointer-events-auto z-20"
-              onClick={(e) => {
-                e.stopPropagation();
-                removeZone(zone.id);
-              }}
-            >
-              ×
-            </button>
-
-            {/* 4 corner resize handles */}
-            {(["nw", "ne", "sw", "se"] as const).map((corner) => {
-              const pos: React.CSSProperties = {};
-              if (corner.includes("n")) pos.top = -4;
-              if (corner.includes("s")) pos.bottom = -4;
-              if (corner.includes("w")) pos.left = -4;
-              if (corner.includes("e")) pos.right = -4;
-              const cursorMap = { nw: "nwse-resize", ne: "nesw-resize", sw: "nesw-resize", se: "nwse-resize" };
-              return (
-                <div
-                  key={corner}
-                  className="absolute w-2.5 h-2.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity pointer-events-auto z-20"
-                  style={{
-                    ...pos,
-                    background: col.border,
-                    cursor: cursorMap[corner],
-                  }}
-                  onMouseDown={(e) => !drawMode && startDrag(e, zone, corner)}
-                />
-              );
-            })}
-          </div>
-        );
-      })}
-
-      {/* ── Preview rect while drawing ── */}
       <div
-        ref={previewRef}
-        className="absolute border-2 border-dashed pointer-events-none"
+        className="absolute"
         style={{
-          display: "none",
-          borderColor: c(zoneType).border,
-          background: c(zoneType).bg,
+          pointerEvents: drawMode || dragRef.current || zones.length > 0 ? "auto" : "none",
+          left: viewport.offsetX,
+          top: viewport.offsetY,
+          width: viewport.width,
+          height: viewport.height,
         }}
-      />
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+      >
+        {/* ── Rendered zones ── */}
+        {zones.map((zone) => {
+          const col = c(zone.type);
+          return (
+            <div
+              key={zone.id}
+              className="absolute group"
+              style={{
+                left: `${zone.x * 100}%`,
+                top: `${zone.y * 100}%`,
+                width: `${zone.width * 100}%`,
+                height: `${zone.height * 100}%`,
+                background: col.bg,
+                border: `2px solid ${col.border}`,
+                boxShadow: `0 0 12px ${col.border}`,
+                pointerEvents: "auto",
+              }}
+              onMouseDown={(e) => !drawMode && startDrag(e, zone, "move")}
+            >
+              {/* Label */}
+              <span
+                className={`absolute top-0.5 left-1 text-[10px] font-mono uppercase tracking-wider select-none ${col.label}`}
+              >
+                {zone.name ?? zone.type}
+              </span>
+
+              {/* Delete button */}
+              <button
+                className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-red-600/80 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer pointer-events-auto z-20"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  removeZone(zone.id);
+                }}
+              >
+                ×
+              </button>
+
+              {/* 4 corner resize handles */}
+              {(["nw", "ne", "sw", "se"] as const).map((corner) => {
+                const pos: React.CSSProperties = {};
+                if (corner.includes("n")) pos.top = -4;
+                if (corner.includes("s")) pos.bottom = -4;
+                if (corner.includes("w")) pos.left = -4;
+                if (corner.includes("e")) pos.right = -4;
+                const cursorMap = { nw: "nwse-resize", ne: "nesw-resize", sw: "nesw-resize", se: "nwse-resize" };
+                return (
+                  <div
+                    key={corner}
+                    className="absolute w-2.5 h-2.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity pointer-events-auto z-20"
+                    style={{
+                      ...pos,
+                      background: col.border,
+                      cursor: cursorMap[corner],
+                    }}
+                    onMouseDown={(e) => !drawMode && startDrag(e, zone, corner)}
+                  />
+                );
+              })}
+            </div>
+          );
+        })}
+
+        {/* ── Preview rect while drawing ── */}
+        <div
+          ref={previewRef}
+          className="absolute border-2 border-dashed pointer-events-none"
+          style={{
+            display: "none",
+            borderColor: c(zoneType).border,
+            background: c(zoneType).bg,
+          }}
+        />
+      </div>
 
       {/* ── Controls ── */}
       <div

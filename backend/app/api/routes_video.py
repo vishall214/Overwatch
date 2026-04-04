@@ -11,7 +11,7 @@ import shutil
 import asyncio
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi import APIRouter, HTTPException, UploadFile, File, Query
 
 from app.schemas.video_schema import (
     SourceSwitchRequest,
@@ -19,7 +19,6 @@ from app.schemas.video_schema import (
     DemoListResponse,
     UploadResponse,
 )
-from app.core.security import get_current_user
 from app.services.source_manager import SourceManager, UPLOADS_DIR
 from app.pipelines.video_pipeline import VideoPipeline
 
@@ -55,10 +54,24 @@ def _get_deps() -> tuple[VideoPipeline, SourceManager]:
     return _pipeline, _source_manager
 
 
+def _resolve_upload_file_path(filename: str) -> str:
+    """Resolve a safe absolute path for a filename under UPLOADS_DIR."""
+    safe_name = os.path.basename(filename)
+    if safe_name != filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    uploads_root = os.path.abspath(UPLOADS_DIR)
+    file_path = os.path.abspath(os.path.join(uploads_root, safe_name))
+
+    if os.path.commonpath([uploads_root, file_path]) != uploads_root:
+        raise HTTPException(status_code=400, detail="Invalid filename path")
+
+    return file_path
+
+
 @router.post("/source", response_model=SourceSwitchResponse)
 async def switch_source(
     request: SourceSwitchRequest,
-    _user_id: int = Depends(get_current_user),
 ) -> SourceSwitchResponse:
     """
     Switch the active video source.
@@ -72,9 +85,12 @@ async def switch_source(
     pipeline, source_mgr = _get_deps()
 
     logger.info(
-        "Source switch requested: type=%s name=%s category=%s path=%s",
-        request.type, request.name, request.category, request.path,
+        "Source switch requested: type=%s module=%s name=%s category=%s path=%s",
+        request.type, request.module, request.name, request.category, request.path,
     )
+
+    print("ACTIVE MODULE:", request.module)
+    print("SOURCE TYPE:", request.type)
 
     try:
         resolved_path = source_mgr.resolve_source(
@@ -86,27 +102,47 @@ async def switch_source(
     except (ValueError, FileNotFoundError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    # Switch source via pipeline (blocking call → executor)
+    target_source_for_start = "0" if request.type == "camera" else resolved_path
+
+    # Switch source via pipeline (or start pipeline if it is currently stopped)
     try:
-        loop = asyncio.get_running_loop()
-        success = await loop.run_in_executor(
-            None,
-            pipeline.switch_source,
-            request.type,
-            resolved_path,
-        )
-        
-        if not success:
-            raise Exception("Pipeline switch_source returned False")
-            
+        if not pipeline.is_running:
+            pipeline.set_active_module(request.module)
+            logger.info(
+                "Pipeline is stopped; starting directly with requested source: %s",
+                target_source_for_start,
+            )
+            started = await pipeline.start(source=target_source_for_start)
+            if not started:
+                raise Exception("Pipeline start failed for requested source")
+        else:
+            loop = asyncio.get_running_loop()
+            success = await loop.run_in_executor(
+                None,
+                pipeline.switch_source,
+                request.type,
+                resolved_path,
+                request.module,
+            )
+
+            if not success:
+                raise Exception(
+                    "Unable to activate requested source. "
+                    "Verify source availability (camera/file/path) and try again."
+                )
+
     except Exception as exc:
         logger.exception("Source switch failed")
         raise HTTPException(status_code=500, detail=f"Source switch failed: {exc}")
 
+    source_info = pipeline.current_source_info
+    source_type = source_info.get("source_type", request.type)
+    source_name = source_info.get("source_name", "Unknown")
+
     return SourceSwitchResponse(
-        message=f"Source switched to {source_mgr.source_name}",
-        source_type=source_mgr.source_type or "none",
-        source_name=source_mgr.source_name,
+        message=f"Source switched to {source_name}",
+        source_type=source_type,
+        source_name=source_name,
     )
 
 
@@ -125,7 +161,6 @@ async def list_demo_videos(
 @router.post("/upload", response_model=UploadResponse)
 async def upload_video(
     file: UploadFile = File(...),
-    _user_id: int = Depends(get_current_user),
 ) -> UploadResponse:
     """
     Upload a video file for analysis.
@@ -170,8 +205,52 @@ async def upload_video(
     )
 
 
+@router.delete("/upload/{filename}")
+async def delete_upload(
+    filename: str,
+) -> dict:
+    """Delete an uploaded video by filename."""
+    pipeline, _ = _get_deps()
+    file_path = _resolve_upload_file_path(filename)
+
+    if not os.path.isfile(file_path):
+        raise HTTPException(status_code=404, detail="Uploaded file not found")
+
+    # If deleting the currently active source, stop pipeline first and clear source metadata.
+    current_info = pipeline.current_source_info
+    current_source_path = current_info.get("source_path") or current_info.get("source")
+    is_active_source = False
+    if current_source_path:
+        active_path = os.path.abspath(str(current_source_path))
+        is_active_source = os.path.normcase(active_path) == os.path.normcase(file_path)
+
+    if is_active_source:
+        if pipeline.is_running:
+            try:
+                await pipeline.stop()
+                logger.info("Pipeline stopped before deleting active upload source")
+            except Exception as exc:
+                logger.exception("Failed stopping pipeline before source delete")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to stop pipeline before deleting source: {exc}",
+                )
+
+        pipeline.reset_source_to_default()
+        logger.info("Active upload source cleared; system returned to no-source state")
+
+    try:
+        os.remove(file_path)
+    except OSError as exc:
+        logger.exception("Failed to delete uploaded video: %s", file_path)
+        raise HTTPException(status_code=500, detail=f"Failed to delete file: {exc}")
+
+    logger.info("Uploaded video deleted: %s", file_path)
+    return {"message": f"Deleted uploaded video: {filename}", "filename": filename}
+
+
 @router.get("/source/info")
 async def source_info() -> dict:
     """Return metadata about the current active source."""
-    _, source_mgr = _get_deps()
-    return source_mgr.info
+    pipeline, _ = _get_deps()
+    return pipeline.current_source_info

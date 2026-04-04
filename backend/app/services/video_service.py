@@ -152,6 +152,11 @@ class VideoService:
             self._capture = None
             logger.info("Video source released: %s", self._source)
 
+    def set_source(self, source: str) -> None:
+        """Set source metadata used for the next start() call."""
+        self._source = source
+        logger.info("Video source reset to: %s", self._source)
+
     @property
     def is_running(self) -> bool:
         """Return whether the video service is actively capturing."""

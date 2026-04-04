@@ -42,6 +42,7 @@ async def list_zones() -> ZoneListResponse:
     """List all active zones (from cache)."""
     service = _get_zone_service()
     cached = service.get_zones()
+    logger.info("CACHED ZONES: %s", cached)
     zones = [ZoneResponse(**z, is_active=True, created_at="2000-01-01T00:00:00") for z in cached]
     # Re-fetch from DB for accurate created_at
     db = SessionLocal()
@@ -71,6 +72,7 @@ async def list_zones() -> ZoneListResponse:
 async def add_zone(payload: ZoneCreate) -> ZoneResponse:
     """Create a new zone and reload cache."""
     service = _get_zone_service()
+    logger.info("ZONE PAYLOAD: %s", payload.model_dump())
     db = SessionLocal()
     try:
         row = create_zone(
@@ -84,6 +86,16 @@ async def add_zone(payload: ZoneCreate) -> ZoneResponse:
             camera_id=payload.camera_id,
         )
         service.reload()
+        logger.info(
+            "ZONE STORED: id=%d type=%s x=%.4f y=%.4f w=%.4f h=%.4f camera_id=%s",
+            row.id,
+            row.type,
+            row.x,
+            row.y,
+            row.width,
+            row.height,
+            row.camera_id,
+        )
         return ZoneResponse(
             id=row.id,
             name=row.name,

@@ -3,6 +3,7 @@ import { getAuthHeaders } from "./auth";
 
 export interface SourceSwitchRequest {
   type: "camera" | "demo" | "upload";
+  module?: "intrusion" | "loitering" | "crowd";
   name?: string;
   category?: string;
   path?: string;
@@ -28,12 +29,18 @@ export interface UploadResponse {
   size_mb: number;
 }
 
+export interface DeleteUploadResponse {
+  message: string;
+  filename: string;
+}
+
 export interface SourceInfo {
-  type: string;
-  path: string;
+  source_type: string;
+  source_path: string;
   source_name: string;
   is_open: boolean;
   is_capturing: boolean;
+  active_module?: "intrusion" | "loitering" | "crowd" | null;
 }
 
 /**
@@ -86,6 +93,23 @@ export async function uploadVideo(file: File): Promise<UploadResponse> {
   if (!res.ok) {
     const error = await res.json();
     throw new Error(error.detail || "Failed to upload video");
+  }
+
+  return res.json();
+}
+
+/**
+ * Delete an uploaded video by filename.
+ */
+export async function deleteUploadedVideo(filename: string): Promise<DeleteUploadResponse> {
+  const res = await fetch(API.video.deleteUpload(filename), {
+    method: "DELETE",
+    headers: getAuthHeaders(),
+  });
+
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to delete uploaded video");
   }
 
   return res.json();

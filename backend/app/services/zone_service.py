@@ -46,6 +46,7 @@ class ZoneService:
                 for r in rows
             ]
             logger.info("ZoneService loaded %d zones", len(self._zones))
+            logger.info("CACHED ZONES: %s", self._zones)
         finally:
             db.close()
 

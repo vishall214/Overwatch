@@ -28,6 +28,10 @@ class SourceSwitchRequest(BaseModel):
         default=None,
         description="Path to uploaded video (required for upload sources).",
     )
+    module: Optional[str] = Field(
+        default=None,
+        description="Module initiating source switch (intrusion/loitering/crowd).",
+    )
 
 
 class SourceSwitchResponse(BaseModel):

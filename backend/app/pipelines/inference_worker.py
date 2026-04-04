@@ -74,7 +74,7 @@ class InferenceWorker:
         self._inference_count: int = 0
         self._avg_inference_ms: float = 0.0
         self._frame_skip_counter: int = 0
-        self._skip_frames: int = 3
+        self._skip_frames: int = 1
         self._drop_count: int = 0
         self._avg_input_age_ms: float = 0.0
 
@@ -165,17 +165,8 @@ class InferenceWorker:
                 except queue.Empty:
                     continue
 
-                # Always prefer the newest captured frame to avoid stale inference.
-                while True:
-                    try:
-                        packet = self._queues.frame_queue.get_nowait()
-                    except queue.Empty:
-                        break
-
-                # Skip frames to reduce detection load
+                # Keep skip counter for observability; processing is no longer skipped.
                 self._frame_skip_counter += 1
-                if self._frame_skip_counter % self._skip_frames != 0:
-                    continue
 
                 input_age_ms = (time.monotonic_ns() - packet.timestamp_ns) / 1_000_000
 
