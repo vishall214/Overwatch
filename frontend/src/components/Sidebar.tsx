@@ -28,7 +28,7 @@ export default function Sidebar({ collapsed, onToggle }: { collapsed: boolean; o
   const location = useLocation();
 
   // Hide sidebar on landing page and login
-  if (location.pathname === "/" || location.pathname === "/login") return null;
+  if (location.pathname === "/" || location.pathname === "/login" || location.pathname === "/signup") return null;
 
   return (
     <aside

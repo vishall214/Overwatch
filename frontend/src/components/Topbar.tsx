@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useLocation, Link } from "react-router-dom";
+import { useLocation, Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useSystemStatus } from "../hooks/useSystemStatus";
 import { fetchCameraStatus, startCamera, stopCamera } from "../api/camera";
@@ -17,6 +17,7 @@ const DEFAULT_MODULES: ModulesState = {
 
 export default function Topbar({ collapsed }: { collapsed: boolean }) {
   const location = useLocation();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { isAuthenticated, user, logout } = useAuth();
   const { data: status } = useSystemStatus();
@@ -26,7 +27,12 @@ export default function Topbar({ collapsed }: { collapsed: boolean }) {
   const [cameraRunningOverride, setCameraRunningOverride] = useState<boolean | null>(null);
 
   // Hide topbar on landing / login
-  if (location.pathname === "/" || location.pathname === "/login") return null;
+  if (location.pathname === "/" || location.pathname === "/login" || location.pathname === "/signup") return null;
+
+  function handleLogout() {
+    logout();
+    navigate("/login", { replace: true });
+  }
 
   const isDashboard = location.pathname === "/dashboard";
   const cameraOnline = cameraRunningOverride ?? cameraStatus?.is_running ?? status?.camera_running ?? false;
@@ -185,7 +191,7 @@ export default function Topbar({ collapsed }: { collapsed: boolean }) {
               <span className="text-xs text-ow-light/70">{user}</span>
             </div>
             <button
-              onClick={logout}
+              onClick={handleLogout}
               className="p-2 rounded-lg hover:bg-ow-accent/5 text-ow-mist/50 hover:text-ow-accent/80 transition-colors"
             >
               <LogOut className="w-4 h-4" />

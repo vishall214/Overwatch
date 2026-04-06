@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import CameraFeed from "../components/CameraFeed";
 import AlertsPanel from "../components/AlertsPanel";
+import SourceSelector from "../components/SourceSelector";
 import { useToggleModule } from "../hooks/useModules";
 import { Eye } from "lucide-react";
 
@@ -43,8 +44,11 @@ export default function Loitering() {
 
       {/* Camera + Alerts */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <div className="lg:col-span-2 h-[50vh] min-h-[350px]">
-          <CameraFeed />
+        <div className="lg:col-span-2">
+          <SourceSelector moduleType="loitering" />
+          <div className="h-[50vh] min-h-[350px]">
+            <CameraFeed moduleType="loitering" />
+          </div>
         </div>
         <AlertsPanel />
       </div>

@@ -9,6 +9,7 @@ Phase 5: PostgreSQL persistence via SQLAlchemy.
 
 import logging
 import os
+import time as _time
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -37,6 +38,10 @@ class AlertService:
     def __init__(self, settings: Settings) -> None:
         self._settings: Settings = settings
         os.makedirs(settings.snapshots_dir, exist_ok=True)
+        # Lightweight in-memory duplicate guard (safety net)
+        # Maps "{event_type}_{zone}" -> last alert monotonic timestamp
+        self._recent_alerts: dict[str, float] = {}
+        self._duplicate_window: float = 10.0  # seconds
 
     def create_alert(
         self,
@@ -61,6 +66,17 @@ class AlertService:
         """
         now = datetime.now(timezone.utc)
         snapshot_path = ""
+
+        # Duplicate guard (diagnostic only — never drops alerts)
+        dup_key = f"{event_type}_{zone}"
+        _now_mono = _time.monotonic()
+        last_ts = self._recent_alerts.get(dup_key, 0.0)
+        if last_ts > 0 and (_now_mono - last_ts) < self._duplicate_window:
+            logger.warning(
+                "Duplicate alert detected: %s (zone=%s) within %.0fs window",
+                event_type, zone, self._duplicate_window,
+            )
+        self._recent_alerts[dup_key] = _now_mono
 
         if frame is not None:
             snapshot_path = self._save_snapshot(event_type, now, frame)

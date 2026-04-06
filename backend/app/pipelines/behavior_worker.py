@@ -30,9 +30,28 @@ from app.core.queues import PipelineQueues, TrackingPacket, BehaviorPacket
 from app.services.alert_service import AlertService
 from app.services.face.face_service import FaceService
 from app.services.module_controller import ModuleController
-from app.utils.geometry_utils import point_in_polygon, bbox_center
+from app.services.zone_service import ZoneService
+from app.utils.geometry_utils import point_in_polygon, bbox_center, rect_intersects_bbox
 
 logger = logging.getLogger(__name__)
+
+# ── Event state engine constants ─────────────────────────────────
+# Minimum consecutive frames before an event is considered stable
+STABILITY_THRESHOLDS: dict[str, int] = {
+    "intrusion": 3,
+    "crowd": 5,
+    # loitering is already time-based — no frame threshold needed
+}
+
+# Seconds before a new alert of the same (event_type, zone) can fire
+COOLDOWN_SECONDS: dict[str, float] = {
+    "intrusion": 15.0,
+    "loitering": 20.0,
+    "crowd": 25.0,
+}
+
+# Seconds after last detection before an event state entry is purged
+EVENT_STATE_TTL: float = 45.0
 
 
 class BehaviorWorker:
@@ -71,6 +90,7 @@ class BehaviorWorker:
         alert_service: Optional[AlertService] = None,
         face_service: Optional[FaceService] = None,
         module_controller: Optional[ModuleController] = None,
+        zone_service: Optional[ZoneService] = None,
     ) -> None:
         self._settings: Settings = settings
         self._queues: PipelineQueues = queues
@@ -78,6 +98,7 @@ class BehaviorWorker:
         self._alert_service: Optional[AlertService] = alert_service
         self._face_service: Optional[FaceService] = face_service
         self._module_controller: Optional[ModuleController] = module_controller
+        self._zone_service: Optional[ZoneService] = zone_service
         self._zone_polygon: list[tuple[float, float]] = [
             (float(p[0]), float(p[1])) for p in settings.zone_a
         ]
@@ -91,6 +112,7 @@ class BehaviorWorker:
         self._loiter_state: dict[int, float] = {}
         self._loiter_alerted: set[int] = set()
         self._crowd_alerted: bool = False
+        self._crowd_alerted_zones: set[int] = set()
         self._face_match_alerted: set[int] = set()
         self._identity_cache: dict[int, dict] = {}
         self._pending_tracks: set[int] = set()
@@ -105,6 +127,12 @@ class BehaviorWorker:
         self._weapon_consecutive_threshold: int = settings.weapon_consecutive_threshold
         self._weapon_cooldown_seconds: float = settings.weapon_cooldown_seconds
         self._active_weapon_alerts: list[dict] = []  # For drawing on current frame
+
+        # ── Event state engine ───────────────────────────────────
+        # Keyed by event_key = "{event_type}_{zone_id}_{track_id}"
+        # Value: {"first_seen": float, "last_seen": float,
+        #         "stable_count": int, "last_alert_time": float}
+        self._event_states: dict[str, dict] = {}
 
     def start(self) -> None:
         """Start the behavior worker in a background thread."""
@@ -123,9 +151,11 @@ class BehaviorWorker:
         self._loiter_state.clear()
         self._loiter_alerted.clear()
         self._crowd_alerted = False
+        self._crowd_alerted_zones.clear()
         self._face_match_alerted.clear()
         self._identity_cache.clear()
         self._pending_tracks.clear()
+        self._event_states.clear()
         self._drop_count = 0
         self._avg_behavior_ms = 0.0
         self._weapon_state.clear()
@@ -167,6 +197,25 @@ class BehaviorWorker:
             "BehaviorWorker stopped (analyzed %d frames)", self._analyze_count,
         )
 
+    def reset_event_state(self) -> None:
+        """
+        Clear all event and detection state.
+
+        Called when the video source changes so that stale
+        intrusion/loitering/crowd state from a previous source
+        does not carry over.
+        """
+        self._active_intrusions.clear()
+        self._loiter_state.clear()
+        self._loiter_alerted.clear()
+        self._crowd_alerted = False
+        self._crowd_alerted_zones.clear()
+        self._event_states.clear()
+        self._face_match_alerted.clear()
+        self._identity_cache.clear()
+        self._pending_tracks.clear()
+        logger.info("BehaviorWorker event state reset")
+
     def _publish_event(self, event: Event) -> None:
         """Publish an event to the bus from a worker thread."""
         if self._event_loop is not None and self._event_loop.is_running():
@@ -176,6 +225,62 @@ class BehaviorWorker:
             )
         else:
             logger.debug("No event loop available, skipping event publish")
+
+    # ── Event state engine helpers ───────────────────────────────
+
+    @staticmethod
+    def _make_event_key(event_type: str, zone_id: str, track_id: int = 0) -> str:
+        """Build a unique key for the event state dict.
+
+        Key format: ``{event_type}_{zone_id}_{track_id}``
+        """
+        return f"{event_type}_{zone_id}_{track_id}"
+
+    def _update_event_state(
+        self, event_key: str, now: float,
+    ) -> dict:
+        """Insert or update an event state entry and return it."""
+        state = self._event_states.get(event_key)
+        if state is None:
+            state = {
+                "first_seen": now,
+                "last_seen": now,
+                "stable_count": 1,
+                "last_alert_time": 0.0,
+            }
+            self._event_states[event_key] = state
+        else:
+            state["last_seen"] = now
+            state["stable_count"] += 1
+        return state
+
+    def _should_trigger_alert(
+        self, event_type: str, state: dict, now: float,
+    ) -> bool:
+        """Check both stability threshold and cooldown for an event.
+
+        Returns True only when:
+        1. ``stable_count >= STABILITY_THRESHOLDS[event_type]``  (default 1)
+        2. ``now - last_alert_time >= COOLDOWN_SECONDS[event_type]``
+        """
+        threshold = STABILITY_THRESHOLDS.get(event_type, 1)
+        if state["stable_count"] < threshold:
+            return False
+
+        cooldown = COOLDOWN_SECONDS.get(event_type, 15.0)
+        if state["last_alert_time"] > 0 and (now - state["last_alert_time"]) < cooldown:
+            return False
+
+        return True
+
+    def _cleanup_stale_events(self, now: float) -> None:
+        """Remove event state entries unseen for longer than EVENT_STATE_TTL."""
+        stale_keys = [
+            k for k, v in self._event_states.items()
+            if (now - v["last_seen"]) > EVENT_STATE_TTL
+        ]
+        for k in stale_keys:
+            del self._event_states[k]
 
     def _face_worker_loop(self) -> None:
         """Background thread: dequeue person crops, run InsightFace, update caches."""
@@ -275,131 +380,286 @@ class BehaviorWorker:
                     else {"intrusion": True, "loitering": True, "crowd": True}
                 )
 
-                # --- Check each tracked object against Zone A ----------
+                # --- Resolve zones (cached — no DB call) ---------------
+                user_zones: list[dict] = []
+                if self._zone_service is not None:
+                    user_zones = self._zone_service.get_zones()
+                use_legacy = len(user_zones) == 0
+
+                frame_h, frame_w = packet.frame.shape[:2]
+                zone_debug_enabled = self._settings.debug_zone_logs
+                should_log_zone_frame = zone_debug_enabled and (packet.frame_index % 30 == 0)
+
+                if should_log_zone_frame:
+                    logger.info(
+                        "ZONE DEBUG FRAME: frame=%d frame_w=%d frame_h=%d zones=%s",
+                        packet.frame_index,
+                        frame_w,
+                        frame_h,
+                        [
+                            {
+                                "id": z.get("id"),
+                                "type": z.get("type"),
+                                "x": round(float(z.get("x", 0.0)), 4),
+                                "y": round(float(z.get("y", 0.0)), 4),
+                                "w": round(float(z.get("width", 0.0)), 4),
+                                "h": round(float(z.get("height", 0.0)), 4),
+                            }
+                            for z in user_zones
+                        ],
+                    )
+
+                # Per-zone counters for crowd detection
+                people_per_zone: dict[int, int] = {}
+
+                # --- Check each tracked object against zones ----------
                 for obj in packet.tracked_objects:
                     bbox = obj["bbox"]
+                    det_bbox_norm = [
+                        bbox[0] / frame_w,
+                        bbox[1] / frame_h,
+                        bbox[2] / frame_w,
+                        bbox[3] / frame_h,
+                    ]
+
+                    if should_log_zone_frame:
+                        logger.info(
+                            "DETECTION BBOX: track=%d bbox_px=[%.1f, %.1f, %.1f, %.1f] bbox_norm=[%.4f, %.4f, %.4f, %.4f]",
+                            obj["track_id"],
+                            bbox[0],
+                            bbox[1],
+                            bbox[2],
+                            bbox[3],
+                            det_bbox_norm[0],
+                            det_bbox_norm[1],
+                            det_bbox_norm[2],
+                            det_bbox_norm[3],
+                        )
+
                     center = bbox_center(bbox)
                     track_id = obj["track_id"]
                     current_track_ids.add(track_id)
+                    is_person = obj.get("class_name", "unknown") == "person"
 
-                    if point_in_polygon(center, self._zone_polygon):
-                        # Always count persons — needed for crowd detection
-                        if obj.get("class_name", "unknown") == "person":
-                            people_in_zone += 1
+                    in_any_zone = False
 
-                        # Intrusion detection (gated by module controller)
-                        if _mod["intrusion"]:
-                            intrusion_detected = True
-                            if track_id not in self._active_intrusions:
-                                self._active_intrusions.add(track_id)
-                                event_data = {
-                                    "track_id": track_id,
-                                    "zone": "A",
-                                    "class_name": obj.get("class_name", "unknown"),
-                                    "bbox": bbox,
-                                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                                }
-                                behavior_events.append(event_data)
-                                self._publish_event(Event(
-                                    type="IntrusionDetected",
-                                    data=event_data,
-                                ))
-                                if self._alert_service is not None:
-                                    self._alert_service.create_alert(
-                                        event_type="intrusion",
-                                        track_id=track_id,
-                                        zone="A",
-                                        metadata=event_data,
-                                        frame=packet.frame,
-                                    )
-                                logger.warning(
-                                    "INTRUSION: %s #%d entered Zone A",
-                                    obj.get("class_name", "unknown"),
-                                    track_id,
-                                )
-                        else:
-                            # Module disabled — clear state so re-enable fires a fresh alert
-                            self._active_intrusions.discard(track_id)
+                    if use_legacy:
+                        # ---------- Legacy polygon fallback ----------
+                        if point_in_polygon(center, self._zone_polygon):
+                            in_any_zone = True
+                            if is_person:
+                                people_in_zone += 1
 
-                        # Loitering detection (gated by module controller)
-                        if _mod["loitering"]:
-                            if track_id not in self._loiter_state:
-                                self._loiter_state[track_id] = now
-
-                            duration = now - self._loiter_state[track_id]
-                            loiter_timers[track_id] = duration
-
-                            if duration >= self._loiter_threshold:
-                                loitering_detected = True
-                                if track_id not in self._loiter_alerted:
-                                    self._loiter_alerted.add(track_id)
-                                    loiter_event = {
+                            # -- Intrusion (legacy) --
+                            if _mod["intrusion"]:
+                                intrusion_detected = True
+                                ekey = self._make_event_key("intrusion", "A", track_id)
+                                state = self._update_event_state(ekey, now)
+                                if self._should_trigger_alert("intrusion", state, now):
+                                    state["last_alert_time"] = now
+                                    self._active_intrusions.add(track_id)
+                                    event_data = {
                                         "track_id": track_id,
-                                        "duration": round(duration, 1),
                                         "zone": "A",
                                         "class_name": obj.get("class_name", "unknown"),
+                                        "bbox": bbox,
                                         "timestamp": datetime.now(timezone.utc).isoformat(),
                                     }
-                                    behavior_events.append(loiter_event)
-                                    self._publish_event(Event(
-                                        type="LoiteringDetected",
-                                        data=loiter_event,
-                                    ))
+                                    behavior_events.append(event_data)
+                                    self._publish_event(Event(type="IntrusionDetected", data=event_data))
                                     if self._alert_service is not None:
                                         self._alert_service.create_alert(
-                                            event_type="loitering",
-                                            track_id=track_id,
-                                            zone="A",
-                                            metadata=loiter_event,
-                                            frame=packet.frame,
+                                            event_type="intrusion", track_id=track_id,
+                                            zone="A", metadata=event_data, frame=packet.frame,
                                         )
-                                    logger.warning(
-                                        "LOITERING: %s #%d in Zone A for %.1fs",
-                                        obj.get("class_name", "unknown"),
-                                        track_id,
-                                        duration,
-                                    )
-                        else:
-                            # Module disabled — reset timer so re-enable starts fresh
-                            self._loiter_state.pop(track_id, None)
-                            self._loiter_alerted.discard(track_id)
+                                    logger.warning("INTRUSION: %s #%d entered Zone A", obj.get("class_name", "unknown"), track_id)
+                            else:
+                                self._active_intrusions.discard(track_id)
 
+                            # -- Loitering (legacy) --
+                            if _mod["loitering"]:
+                                if track_id not in self._loiter_state:
+                                    self._loiter_state[track_id] = now
+                                duration = now - self._loiter_state[track_id]
+                                loiter_timers[track_id] = duration
+                                if duration >= self._loiter_threshold:
+                                    loitering_detected = True
+                                    ekey = self._make_event_key("loitering", "A", track_id)
+                                    state = self._update_event_state(ekey, now)
+                                    if self._should_trigger_alert("loitering", state, now):
+                                        state["last_alert_time"] = now
+                                        self._loiter_alerted.add(track_id)
+                                        loiter_event = {
+                                            "track_id": track_id, "duration": round(duration, 1),
+                                            "zone": "A", "class_name": obj.get("class_name", "unknown"),
+                                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                                        }
+                                        behavior_events.append(loiter_event)
+                                        self._publish_event(Event(type="LoiteringDetected", data=loiter_event))
+                                        if self._alert_service is not None:
+                                            self._alert_service.create_alert(
+                                                event_type="loitering", track_id=track_id,
+                                                zone="A", metadata=loiter_event, frame=packet.frame,
+                                            )
+                                        logger.warning("LOITERING: %s #%d in Zone A for %.1fs", obj.get("class_name", "unknown"), track_id, duration)
+                            else:
+                                self._loiter_state.pop(track_id, None)
+                                self._loiter_alerted.discard(track_id)
                     else:
-                        # Object left the zone
+                        # ---------- User-defined rectangular zones ----------
+                        for zone in user_zones:
+                            zone_bbox_px = [
+                                zone["x"] * frame_w,
+                                zone["y"] * frame_h,
+                                (zone["x"] + zone["width"]) * frame_w,
+                                (zone["y"] + zone["height"]) * frame_h,
+                            ]
+                            intersects = rect_intersects_bbox(zone, bbox, frame_w, frame_h)
+
+                            if should_log_zone_frame:
+                                logger.info(
+                                    "ZONE: id=%d type=%s bbox_norm=[%.4f, %.4f, %.4f, %.4f] bbox_px=[%.1f, %.1f, %.1f, %.1f]",
+                                    zone["id"],
+                                    zone["type"],
+                                    zone["x"],
+                                    zone["y"],
+                                    zone["x"] + zone["width"],
+                                    zone["y"] + zone["height"],
+                                    zone_bbox_px[0],
+                                    zone_bbox_px[1],
+                                    zone_bbox_px[2],
+                                    zone_bbox_px[3],
+                                )
+                                logger.info(
+                                    "INTERSECTION INPUTS: zone_bbox_px=[%.1f, %.1f, %.1f, %.1f] detection_bbox_px=[%.1f, %.1f, %.1f, %.1f] intersects=%s",
+                                    zone_bbox_px[0],
+                                    zone_bbox_px[1],
+                                    zone_bbox_px[2],
+                                    zone_bbox_px[3],
+                                    bbox[0],
+                                    bbox[1],
+                                    bbox[2],
+                                    bbox[3],
+                                    intersects,
+                                )
+
+                            if not intersects:
+                                continue
+                            in_any_zone = True
+                            zone_name = zone.get("name", f"Zone {zone['id']}")
+                            zone_type = zone["type"]
+                            zone_id = zone["id"]
+
+                            if is_person:
+                                people_per_zone[zone_id] = people_per_zone.get(zone_id, 0) + 1
+
+                            # -- Intrusion (user zone) --
+                            if zone_type == "intrusion" and _mod["intrusion"]:
+                                intrusion_detected = True
+                                ekey = self._make_event_key("intrusion", str(zone_id), track_id)
+                                state = self._update_event_state(ekey, now)
+                                if self._should_trigger_alert("intrusion", state, now):
+                                    state["last_alert_time"] = now
+                                    self._active_intrusions.add(track_id)
+                                    event_data = {
+                                        "track_id": track_id, "zone": zone_name,
+                                        "class_name": obj.get("class_name", "unknown"),
+                                        "bbox": bbox,
+                                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                                    }
+                                    behavior_events.append(event_data)
+                                    self._publish_event(Event(type="IntrusionDetected", data=event_data))
+                                    if self._alert_service is not None:
+                                        self._alert_service.create_alert(
+                                            event_type="intrusion", track_id=track_id,
+                                            zone=zone_name, metadata=event_data, frame=packet.frame,
+                                        )
+                                    logger.warning("INTRUSION: %s #%d entered %s", obj.get("class_name", "unknown"), track_id, zone_name)
+
+                            # -- Loitering (user zone) --
+                            if zone_type == "loitering" and _mod["loitering"]:
+                                if track_id not in self._loiter_state:
+                                    self._loiter_state[track_id] = now
+                                duration = now - self._loiter_state[track_id]
+                                loiter_timers[track_id] = duration
+                                if duration >= self._loiter_threshold:
+                                    loitering_detected = True
+                                    ekey = self._make_event_key("loitering", str(zone_id), track_id)
+                                    state = self._update_event_state(ekey, now)
+                                    if self._should_trigger_alert("loitering", state, now):
+                                        state["last_alert_time"] = now
+                                        self._loiter_alerted.add(track_id)
+                                        loiter_event = {
+                                            "track_id": track_id, "duration": round(duration, 1),
+                                            "zone": zone_name, "class_name": obj.get("class_name", "unknown"),
+                                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                                        }
+                                        behavior_events.append(loiter_event)
+                                        self._publish_event(Event(type="LoiteringDetected", data=loiter_event))
+                                        if self._alert_service is not None:
+                                            self._alert_service.create_alert(
+                                                event_type="loitering", track_id=track_id,
+                                                zone=zone_name, metadata=loiter_event, frame=packet.frame,
+                                            )
+                                        logger.warning("LOITERING: %s #%d in %s for %.1fs", obj.get("class_name", "unknown"), track_id, zone_name, duration)
+
+                    if not in_any_zone:
+                        # Object left all zones
                         self._active_intrusions.discard(track_id)
                         self._loiter_state.pop(track_id, None)
                         self._loiter_alerted.discard(track_id)
 
-                # --- Crowd detection (gated by module controller) ------
-                if _mod["crowd"] and people_in_zone > self._crowd_threshold:
-                    crowd_detected = True
-                    if not self._crowd_alerted:
-                        self._crowd_alerted = True
-                        crowd_event = {
-                            "count": people_in_zone,
-                            "threshold": self._crowd_threshold,
-                            "zone": "A",
-                            "timestamp": datetime.now(timezone.utc).isoformat(),
-                        }
-                        behavior_events.append(crowd_event)
-                        self._publish_event(Event(
-                            type="CrowdDetected",
-                            data=crowd_event,
-                        ))
-                        if self._alert_service is not None:
-                            self._alert_service.create_alert(
-                                event_type="crowd",
-                                track_id=None,
-                                zone="A",
-                                metadata=crowd_event,
-                                frame=packet.frame,
-                            )
-                        logger.warning(
-                            "CROWD: %d persons in Zone A (threshold %d)",
-                            people_in_zone, self._crowd_threshold,
-                        )
+                # --- Crowd detection (event-state-driven) ---------------
+                if use_legacy:
+                    if _mod["crowd"] and people_in_zone > self._crowd_threshold:
+                        crowd_detected = True
+                        ekey = self._make_event_key("crowd", "A", 0)
+                        state = self._update_event_state(ekey, now)
+                        if self._should_trigger_alert("crowd", state, now):
+                            state["last_alert_time"] = now
+                            self._crowd_alerted = True
+                            crowd_event = {
+                                "count": people_in_zone, "threshold": self._crowd_threshold,
+                                "zone": "A", "timestamp": datetime.now(timezone.utc).isoformat(),
+                            }
+                            behavior_events.append(crowd_event)
+                            self._publish_event(Event(type="CrowdDetected", data=crowd_event))
+                            if self._alert_service is not None:
+                                self._alert_service.create_alert(
+                                    event_type="crowd", track_id=None,
+                                    zone="A", metadata=crowd_event, frame=packet.frame,
+                                )
+                            logger.warning("CROWD: %d persons in Zone A (threshold %d)", people_in_zone, self._crowd_threshold)
+                    else:
+                        self._crowd_alerted = False
                 else:
-                    self._crowd_alerted = False
+                    for zone in user_zones:
+                        if zone["type"] != "crowd":
+                            continue
+                        zid = zone["id"]
+                        z_count = people_per_zone.get(zid, 0)
+                        zone_name = zone.get("name", f"Zone {zid}")
+                        if _mod["crowd"] and z_count > self._crowd_threshold:
+                            crowd_detected = True
+                            ekey = self._make_event_key("crowd", str(zid), 0)
+                            state = self._update_event_state(ekey, now)
+                            if self._should_trigger_alert("crowd", state, now):
+                                state["last_alert_time"] = now
+                                self._crowd_alerted_zones.add(zid)
+                                crowd_event = {
+                                    "count": z_count, "threshold": self._crowd_threshold,
+                                    "zone": zone_name, "timestamp": datetime.now(timezone.utc).isoformat(),
+                                }
+                                behavior_events.append(crowd_event)
+                                self._publish_event(Event(type="CrowdDetected", data=crowd_event))
+                                if self._alert_service is not None:
+                                    self._alert_service.create_alert(
+                                        event_type="crowd", track_id=None,
+                                        zone=zone_name, metadata=crowd_event, frame=packet.frame,
+                                    )
+                                logger.warning("CROWD: %d persons in %s (threshold %d)", z_count, zone_name, self._crowd_threshold)
+                        else:
+                            self._crowd_alerted_zones.discard(zid)
 
                 # Clean up state for tracks that disappeared
                 stale_ids = set(self._loiter_state.keys()) - current_track_ids
@@ -407,6 +667,9 @@ class BehaviorWorker:
                     self._loiter_state.pop(tid, None)
                     self._loiter_alerted.discard(tid)
                     self._active_intrusions.discard(tid)
+
+                # Clean up stale event states (memory leak prevention)
+                self._cleanup_stale_events(now)
 
                 # --- Face recognition (disabled when enable_face_recognition=False) ---
                 face_results: list[dict] = []
@@ -477,6 +740,7 @@ class BehaviorWorker:
                     people_in_zone,
                     loiter_timers,
                     weapon_detected=(weapon_detected or bool(self._active_weapon_alerts)),
+                    user_zones,
                 )
 
                 # --- Draw face identity overlays ----------------------
@@ -546,6 +810,13 @@ class BehaviorWorker:
 
         logger.info("Behavior loop exited")
 
+    # Zone type → BGR colour map
+    _ZONE_COLOURS: dict[str, tuple[int, int, int]] = {
+        "intrusion": (0, 0, 255),     # red
+        "loitering": (0, 165, 255),   # orange
+        "crowd": (0, 255, 255),       # yellow
+    }
+
     def _draw_zone_overlay(
         self,
         frame: np.ndarray,
@@ -555,42 +826,50 @@ class BehaviorWorker:
         people_in_zone: int,
         loiter_timers: dict[int, float],
         weapon_detected: bool = False,
+        user_zones: Optional[list[dict]] = None,
+        user_zones: Optional[list[dict]] = None,
     ) -> np.ndarray:
         """
-        Draw the intrusion zone polygon, loiter timers, crowd count, and alert text.
+        Draw zone overlays, loiter timers, crowd count, and alert text.
 
-        Args:
-            frame: Annotated frame (will be copied).
-            intrusion_detected: Whether any object is inside Zone A.
-            loitering_detected: Whether any object exceeded loiter threshold.
-            crowd_detected: Whether crowd threshold was exceeded.
-            people_in_zone: Number of persons currently inside the zone.
-            loiter_timers: Maps track_id → seconds inside zone.
-
-        Returns:
-            np.ndarray: Frame with zone overlay drawn.
+        Supports both legacy polygon and user-defined rectangular zones.
         """
         annotated = frame.copy()
+        h, w = annotated.shape[:2]
 
-        # Draw zone polygon
-        pts = np.array(self._zone_polygon, dtype=np.int32).reshape((-1, 1, 2))
-        zone_colour = (0, 0, 255) if intrusion_detected else (0, 255, 0)
+        if user_zones:
+            # ---------- Draw user-defined rectangular zones ----------
+            overlay = annotated.copy()
+            for zone in user_zones:
+                zx1 = int(zone["x"] * w)
+                zy1 = int(zone["y"] * h)
+                zx2 = int((zone["x"] + zone["width"]) * w)
+                zy2 = int((zone["y"] + zone["height"]) * h)
+                colour = self._ZONE_COLOURS.get(zone["type"], (0, 255, 0))
+                cv2.rectangle(overlay, (zx1, zy1), (zx2, zy2), colour, -1)
+                cv2.rectangle(annotated, (zx1, zy1), (zx2, zy2), colour, 2)
+                label = zone.get("name", f"Zone {zone['id']}")
+                cv2.putText(
+                    annotated, f"{label} [{zone['type']}]",
+                    (zx1 + 5, zy1 + 18),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, colour, 1,
+                )
+            cv2.addWeighted(overlay, 0.15, annotated, 0.85, 0, annotated)
+        else:
+            # ---------- Legacy polygon fallback ----------
+            pts = np.array(self._zone_polygon, dtype=np.int32).reshape((-1, 1, 2))
+            zone_colour = (0, 0, 255) if intrusion_detected else (0, 255, 0)
+            overlay = annotated.copy()
+            cv2.fillPoly(overlay, [pts], zone_colour)
+            cv2.addWeighted(overlay, 0.2, annotated, 0.8, 0, annotated)
+            cv2.polylines(annotated, [pts], isClosed=True, color=zone_colour, thickness=2)
+            cv2.putText(
+                annotated, "Zone A",
+                (int(self._zone_polygon[0][0]) + 5, int(self._zone_polygon[0][1]) - 8),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, zone_colour, 1,
+            )
 
-        # Semi-transparent fill
-        overlay = annotated.copy()
-        cv2.fillPoly(overlay, [pts], zone_colour)
-        cv2.addWeighted(overlay, 0.2, annotated, 0.8, 0, annotated)
-
-        # Zone border
-        cv2.polylines(annotated, [pts], isClosed=True, color=zone_colour, thickness=2)
-
-        # Zone label
-        cv2.putText(
-            annotated, "Zone A", (int(self._zone_polygon[0][0]) + 5, int(self._zone_polygon[0][1]) - 8),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.5, zone_colour, 1,
-        )
-
-        # Alert text priority: weapon > intrusion > loitering > crowd
+        # --- Alert text overlays ---
         y_offset = 30
 
         # Weapon alert (highest priority — rendered first at top)
@@ -609,7 +888,6 @@ class BehaviorWorker:
             )
             y_offset += 35
 
-        # Loitering alert
         if loitering_detected:
             cv2.putText(
                 annotated, "LOITERING DETECTED", (10, y_offset),
@@ -617,14 +895,12 @@ class BehaviorWorker:
             )
             y_offset += 35
 
-        # Crowd count overlay
         cv2.putText(
             annotated, f"People Count: {people_in_zone}", (10, y_offset),
             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2,
         )
         y_offset += 30
 
-        # Crowd alert
         if crowd_detected:
             cv2.putText(
                 annotated, "CROWD DETECTED", (10, y_offset),
@@ -632,7 +908,6 @@ class BehaviorWorker:
             )
             y_offset += 35
 
-        # Per-object loiter timers
         for track_id, duration in loiter_timers.items():
             timer_text = f"LOITERING TIMER #{track_id}: {duration:.1f}s"
             cv2.putText(
@@ -919,4 +1194,5 @@ class BehaviorWorker:
             "frames_dropped": self._drop_count,
             "face_queue_depth": self._face_queue.qsize(),
             "pending_face_tracks": len(self._pending_tracks),
+            "active_event_states": len(self._event_states),
         }

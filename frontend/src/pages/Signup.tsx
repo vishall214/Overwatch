@@ -1,13 +1,12 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Mail, Lock, User, Eye, EyeOff, Loader, AlertCircle, CheckCircle } from 'lucide-react';
+import { Mail, Lock, Eye, EyeOff, Loader, AlertCircle, CheckCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 export default function Signup() {
   const navigate = useNavigate();
   const { register } = useAuth();
   const [formData, setFormData] = useState({
-    name: '',
     email: '',
     password: '',
     confirmPassword: '',
@@ -25,10 +24,6 @@ export default function Signup() {
   };
 
   const validateForm = () => {
-    if (!formData.name.trim()) {
-      setError('Name is required');
-      return false;
-    }
     if (!formData.email.includes('@')) {
       setError('Valid email is required');
       return false;
@@ -50,8 +45,7 @@ export default function Signup() {
 
     setLoading(true);
     try {
-      // Call the register function (will be implemented with real auth)
-      await register(formData.email, formData.password, formData.name);
+      await register(formData.email, formData.password);
       setSuccess(true);
       setTimeout(() => navigate('/dashboard'), 2000);
     } catch (err) {
@@ -75,35 +69,10 @@ export default function Signup() {
             <h1 className="text-3xl font-black text-ow-light mb-2">
               Signup
             </h1>
-            <p className="text-ow-mist/60 text-sm">
-              Join OVERWATCH and start monitoring in minutes
-            </p>
           </div>
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-5">
-            {/* Name Field */}
-            <div className="group">
-              <label htmlFor="name" className="block text-xs font-semibold text-ow-mist/70 mb-2.5 uppercase tracking-wide">
-                Full Name
-              </label>
-              <div className="relative">
-                <User className="absolute left-3.5 top-3 w-4 h-4 text-ow-accent/50 group-focus-within:text-ow-accent transition-colors" />
-                <input
-                  id="name"
-                  name="name"
-                  type="text"
-                  value={formData.name}
-                  onChange={handleChange}
-                  placeholder="John Doe"
-                  className="w-full pl-10 pr-4 py-2.5 bg-ow-surface/60 border border-ow-accent/10 rounded-lg
-                           text-ow-light placeholder:text-ow-mist/30
-                           focus:outline-none focus:border-ow-accent/40 focus:bg-ow-surface/80 transition-all
-                           hover:border-ow-accent/20"
-                />
-              </div>
-            </div>
-
             {/* Email Field */}
             <div className="group">
               <label htmlFor="email" className="block text-xs font-semibold text-ow-mist/70 mb-2.5 uppercase tracking-wide">
@@ -252,12 +221,6 @@ export default function Signup() {
         </div>
 
         {/* Footer Link */}
-        <p className="text-center text-xs text-ow-mist/40 mt-6">
-          By creating an account, you agree to our{' '}
-          <button className="text-ow-accent/60 hover:text-ow-accent transition-colors">
-            Terms of Service
-          </button>
-        </p>
       </div>
     </div>
   );

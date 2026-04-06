@@ -1,32 +1,34 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { Eye, Lock, User as UserIcon } from "lucide-react";
 
 export default function Login() {
-  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const { login, isAuthenticated } = useAuth();
   const navigate = useNavigate();
 
-  if (isAuthenticated) {
-    navigate("/dashboard", { replace: true });
-    return null;
-  }
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate("/dashboard", { replace: true });
+    }
+  }, [isAuthenticated, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-    if (!username.trim()) {
-      setError("Username is required");
+    if (!email.trim()) {
+      setError("Email is required");
       return;
     }
-    const ok = await login(username, password);
-    if (ok) {
+
+    try {
+      await login(email, password);
       navigate("/dashboard", { replace: true });
-    } else {
-      setError("Invalid credentials");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Invalid credentials");
     }
   };
 
@@ -56,14 +58,14 @@ export default function Login() {
           className="rounded-2xl glass-panel-heavy p-8 shadow-2xl space-y-5"
         >
           <div>
-            <label className="block text-xs text-ow-mist/50 uppercase tracking-wider mb-2">Username</label>
+            <label className="block text-xs text-ow-mist/50 uppercase tracking-wider mb-2">Email</label>
             <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-ow-teal/8 border border-[rgba(255,255,255,0.06)] focus-within:border-ow-accent/30 transition-colors">
               <UserIcon className="w-4 h-4 text-ow-mist/40" />
               <input
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="Enter username"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
                 className="bg-transparent text-sm text-ow-light/80 placeholder:text-ow-mist/25 outline-none w-full"
               />
             </div>
@@ -96,10 +98,6 @@ export default function Login() {
           >
             Sign In
           </button>
-
-          <p className="text-center text-xs text-ow-mist/25">
-            Demo mode — enter any username to proceed
-          </p>
 
           <div className="mt-3 text-center">
             <Link
