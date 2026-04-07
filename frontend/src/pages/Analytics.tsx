@@ -18,17 +18,18 @@ import {
   getDistribution,
   getSummary,
   getRecentAlerts,
-  type TimeSeriesPoint,
-  type SummaryMetrics,
-  type EventDistribution,
   type AlertRecord,
 } from "../services/analyticsService";
+import { formatEventLabel, normalizeEventType } from "../utils/normalization";
 
 // Color scheme for events
 const EVENT_COLORS = {
   intrusion: "#e74c3c",
   loitering: "#f39c12",
   crowd: "#3498db",
+  weapon_in_zone: "#e74c3c",
+  weapon_detected: "#9b59b6",
+  dangerous_object: "#9b59b6",
 };
 
 interface SummaryCardProps {
@@ -92,8 +93,9 @@ interface RecentAlertItemProps {
 }
 
 const RecentAlertItem: React.FC<RecentAlertItemProps> = ({ alert }) => {
+  const normalizedType = normalizeEventType(alert.event_type);
   const color =
-    EVENT_COLORS[alert.event_type as keyof typeof EVENT_COLORS] ||
+    EVENT_COLORS[normalizedType as keyof typeof EVENT_COLORS] ||
     "#ffffff";
   const time = new Date(alert.timestamp);
   const timeStr = time.toLocaleTimeString("en-US", {
@@ -110,7 +112,7 @@ const RecentAlertItem: React.FC<RecentAlertItemProps> = ({ alert }) => {
       />
       <div className="flex-1 min-w-0">
         <p className="text-sm font-semibold text-ow-light/80 capitalize">
-          {alert.event_type}
+          {formatEventLabel(normalizedType)}
         </p>
         <p className="text-xs text-ow-mist/50">{alert.zone}</p>
       </div>
@@ -160,16 +162,24 @@ export default function Analytics() {
 
   const distributionChartData = useMemo(() => {
     if (!distributionData?.data) return [];
-    return Object.entries(distributionData.data).map(([type, count]) => ({
-      name: type.charAt(0).toUpperCase() + type.slice(1),
+
+    const normalizedCounts = Object.entries(distributionData.data).reduce(
+      (acc, [type, count]) => {
+        const normalizedType = normalizeEventType(type);
+        acc[normalizedType] = (acc[normalizedType] ?? 0) + count;
+        return acc;
+      },
+      {} as Record<string, number>
+    );
+
+    return Object.entries(normalizedCounts).map(([type, count]) => ({
+      name: formatEventLabel(type),
       value: count,
       fill: EVENT_COLORS[type as keyof typeof EVENT_COLORS] || "#ffffff",
     }));
   }, [distributionData?.data]);
 
   const summary = summaryData?.data;
-
-  const isLoading = summaryLoading || timeSeriesLoading;
 
   return (
     <div className="space-y-6">
@@ -206,7 +216,7 @@ export default function Analytics() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         <SummaryCard
           title="Total Alerts"
           value={summary?.total || 0}
@@ -246,6 +256,28 @@ export default function Analytics() {
             />
           }
           color={EVENT_COLORS.crowd}
+        />
+        <SummaryCard
+          title="Weapon Detected"
+          value={summary?.weapon_detected || 0}
+          icon={
+            <div
+              className="w-5 h-5 rounded"
+              style={{ backgroundColor: EVENT_COLORS.weapon_detected }}
+            />
+          }
+          color={EVENT_COLORS.weapon_detected}
+        />
+        <SummaryCard
+          title="Weapon In Zone"
+          value={summary?.weapon_in_zone || 0}
+          icon={
+            <div
+              className="w-5 h-5 rounded"
+              style={{ backgroundColor: EVENT_COLORS.weapon_in_zone }}
+            />
+          }
+          color={EVENT_COLORS.weapon_in_zone}
         />
       </div>
 

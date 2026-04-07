@@ -17,6 +17,9 @@ export interface EventDistribution {
   intrusion: number;
   loitering: number;
   crowd: number;
+  weapon_detected: number;
+  weapon_in_zone: number;
+  dangerous_object: number;
 }
 
 export interface DistributionResponse {
@@ -30,6 +33,10 @@ export interface SummaryMetrics {
   intrusion: number;
   loitering: number;
   crowd: number;
+  weapon_detected: number;
+  weapon_in_zone: number;
+  dangerous_object: number;
+  face_match: number;
 }
 
 export interface SummaryResponse {

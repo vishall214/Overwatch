@@ -25,6 +25,7 @@ from app.config import Settings
 from app.core.event_bus import EventBus, Event
 from app.core.queues import PipelineQueues, FramePacket, DetectionPacket
 from app.services.detection_service import DetectionService
+from app.services.module_controller import ModuleController
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ class InferenceWorker:
         detection_service: DetectionService,
         queues: PipelineQueues,
         event_bus: EventBus,
+        module_controller: Optional[ModuleController] = None,
     ) -> None:
         """
         Initialize the InferenceWorker.
@@ -63,11 +65,13 @@ class InferenceWorker:
             detection_service: YOLOv8 detection service.
             queues: Pipeline queues container.
             event_bus: Event bus for publishing detection events.
+            module_controller: Optional analytics module state controller.
         """
         self._settings: Settings = settings
         self._detection_service: DetectionService = detection_service
         self._queues: PipelineQueues = queues
         self._event_bus: EventBus = event_bus
+        self._module_controller: Optional[ModuleController] = module_controller
         self._event_loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
         self._is_running: bool = False
@@ -78,6 +82,7 @@ class InferenceWorker:
         self._skip_frames: int = max(1, int(settings.inference_skip_frames))
         self._drop_count: int = 0
         self._avg_input_age_ms: float = 0.0
+        self._weapon_skip_frames: int = max(1, int(settings.weapon_skip_frames))
 
     def start(self) -> None:
         """
@@ -177,9 +182,16 @@ class InferenceWorker:
 
                 # Weapon detection runs on a configurable cadence to limit overhead.
                 weapon_detections_list = None
+                weapon_enabled = (
+                    self._module_controller.is_enabled("weapon_detection")
+                    if self._module_controller is not None
+                    else True
+                )
                 if (
+                    weapon_enabled
+                    and
                     self._detection_service.weapon_is_loaded
-                    and packet.frame_index % self._settings.weapon_skip_frames == 0
+                    and packet.frame_index % self._weapon_skip_frames == 0
                 ):
                     weapon_results = self._detection_service.detect_weapons(packet.frame)
                     weapon_detections_list = [d.to_dict() for d in weapon_results]

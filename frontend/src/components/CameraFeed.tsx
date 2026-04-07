@@ -29,19 +29,6 @@ const CameraFeed = React.memo(function CameraFeed({ moduleType }: CameraFeedProp
     !sourceInfo?.active_module ||
     sourceInfo.active_module === moduleType;
 
-  useEffect(() => {
-    if (!imageElement) return;
-
-    const onLoad = () => {
-      console.log("FRAME RECEIVED:", Date.now());
-    };
-
-    imageElement.addEventListener("load", onLoad);
-    return () => {
-      imageElement.removeEventListener("load", onLoad);
-    };
-  }, [imageElement]);
-
   const paint = useCallback(() => {
     const canvas = canvasRef.current;
     if (canvas && imageElement && imageElement.naturalWidth > 0 && moduleMatches) {

@@ -7,7 +7,6 @@ and uploading video files.
 
 import logging
 import os
-import shutil
 import asyncio
 from typing import Optional
 
@@ -88,9 +87,6 @@ async def switch_source(
         "Source switch requested: type=%s module=%s name=%s category=%s path=%s",
         request.type, request.module, request.name, request.category, request.path,
     )
-
-    print("ACTIVE MODULE:", request.module)
-    print("SOURCE TYPE:", request.type)
 
     try:
         resolved_path = source_mgr.resolve_source(

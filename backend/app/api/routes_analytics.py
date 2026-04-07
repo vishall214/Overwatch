@@ -85,7 +85,7 @@ async def alerts_over_time(
 @router.get("/distribution")
 async def event_distribution(range_: str = "24h") -> dict:
     """
-    Get event distribution (intrusion/loitering/crowd) over time window.
+    Get event distribution (intrusion/loitering/crowd/weapon) over time window.
 
     Args:
         range_: Time window - "1h", "6h", "24h" (default: 24h)
@@ -127,7 +127,7 @@ async def alert_summary(range_: str = "24h") -> dict:
         range_: Time window - "1h", "6h", "24h" (default: 24h)
 
     Returns:
-        Dict with total, intrusion, loitering, crowd counts
+        Dict with total, intrusion, loitering, crowd, and weapon counts
     """
     range_map = {"1h": 1, "6h": 6, "24h": 24}
     range_hours = range_map.get(range_, 24)

@@ -7,7 +7,6 @@ Endpoints for camera pipeline control and MJPEG streaming.
 import asyncio
 import logging
 import queue
-import time
 from typing import AsyncIterator, Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -143,7 +142,6 @@ async def _mjpeg_generator(stream_request_module: Optional[str] = None) -> Async
         return
 
     logger.info("MJPEG stream opened (module=%s)", stream_request_module or "unknown")
-    print("STREAM REQUEST MODULE:", stream_request_module)
 
     loop = asyncio.get_running_loop()
 
@@ -156,8 +154,6 @@ async def _mjpeg_generator(stream_request_module: Optional[str] = None) -> Async
             )
         except queue.Empty:
             continue
-
-        print("FRAME SENT:", time.time())
 
         yield (
             b"--frame\r\n"

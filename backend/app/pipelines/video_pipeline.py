@@ -172,6 +172,7 @@ class VideoPipeline:
             detection_service=self._detection_service,
             queues=self._queues,
             event_bus=self._event_bus,
+            module_controller=self._module_controller,
         )
         self._tracking_worker = TrackingWorker(
             settings=self._settings,
@@ -283,9 +284,6 @@ class VideoPipeline:
 
         if module:
             self._active_module = module
-
-        print("ACTIVE MODULE:", self._active_module)
-        print("SOURCE TYPE:", source_type)
 
         return self._capture_worker.switch_source(source_type, path)
 

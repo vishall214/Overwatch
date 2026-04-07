@@ -134,8 +134,6 @@ const ZoneEditor: React.FC = () => {
 
   /* Drag / resize state (also ref-based) */
   const dragRef = useRef<DragState | null>(null);
-  const drawStartRef = useRef<{ x: number; y: number } | null>(null);
-  const drawLastRef = useRef<{ x: number; y: number } | null>(null);
   const [, forceUpdate] = useState(0);
 
   const initialViewport: VideoViewport = {
@@ -182,21 +180,6 @@ const ZoneEditor: React.FC = () => {
     };
   }, [syncViewport]);
 
-  useEffect(() => {
-    console.log("ZONE VIEWPORT:", {
-      videoWidth: viewport.videoWidth,
-      videoHeight: viewport.videoHeight,
-      canvasWidth: viewport.canvasWidth,
-      canvasHeight: viewport.canvasHeight,
-      containerWidth: viewport.containerWidth,
-      containerHeight: viewport.containerHeight,
-      viewportOffsetX: viewport.offsetX,
-      viewportOffsetY: viewport.offsetY,
-      viewportWidth: viewport.width,
-      viewportHeight: viewport.height,
-    });
-  }, [viewport]);
-
   const pointerToNormalized = useCallback((e: React.MouseEvent): PointerSample | null => {
     const container = containerRef.current;
     if (!container) return null;
@@ -230,17 +213,6 @@ const ZoneEditor: React.FC = () => {
       const x = point.normalizedX;
       const y = point.normalizedY;
 
-      drawStartRef.current = { x: point.rawX, y: point.rawY };
-      drawLastRef.current = { x: point.rawX, y: point.rawY };
-
-      const vp = viewportRef.current;
-      console.log({
-        videoWidth: vp.videoWidth,
-        videoHeight: vp.videoHeight,
-        canvasWidth: vp.canvasWidth,
-        canvasHeight: vp.canvasHeight,
-      });
-
       drawRef.current = { x, y, w: 0, h: 0 };
       setIsDrawing(true);
     },
@@ -256,7 +228,6 @@ const ZoneEditor: React.FC = () => {
       if (isDrawing && drawRef.current) {
         const cx = point.normalizedX;
         const cy = point.normalizedY;
-        drawLastRef.current = { x: point.rawX, y: point.rawY };
         drawRef.current.w = cx - drawRef.current.x;
         drawRef.current.h = cy - drawRef.current.y;
         /* Update preview div directly — no React state during drag */
@@ -331,35 +302,12 @@ const ZoneEditor: React.FC = () => {
       const w = Math.abs(d.w);
       const h = Math.abs(d.h);
 
-      const drawStart = drawStartRef.current;
-      const drawEnd = drawLastRef.current;
-      const vp = viewportRef.current;
-
-      console.log("RAW DRAW:", {
-        x1: drawStart?.x ?? 0,
-        y1: drawStart?.y ?? 0,
-        x2: drawEnd?.x ?? drawStart?.x ?? 0,
-        y2: drawEnd?.y ?? drawStart?.y ?? 0,
-        containerWidth: vp.containerWidth,
-        containerHeight: vp.containerHeight,
-      });
-
-      console.log("NORMALIZED DRAW:", {
-        norm_x: x,
-        norm_y: y,
-        norm_w: w,
-        norm_h: h,
-      });
-
       // Only save zones with meaningful size
       if (w > 0.01 && h > 0.01) {
         const payload = { type: zoneType, x, y, width: w, height: h };
-        console.log("ZONE PAYLOAD:", payload);
         addZone(payload);
       }
       drawRef.current = null;
-      drawStartRef.current = null;
-      drawLastRef.current = null;
       if (previewRef.current) previewRef.current.style.display = "none";
       setIsDrawing(false);
       setDrawMode(false);

@@ -19,5 +19,7 @@ export interface AlertStats {
   loitering: number;
   crowd: number;
   face_match: number;
+  weapon_detected: number;
+  weapon_in_zone: number;
   dangerous_object: number;
 }

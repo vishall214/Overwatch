@@ -159,12 +159,8 @@ class CaptureWorker:
                 ret, frame = self._source_manager.read()
                 capture_time_ms = (time.monotonic() - start_time) * 1000
 
-                print("FRAME READ TIME:", time.time())
                 cap = self._source_manager.current_source
                 fps = cap.get(cv2.CAP_PROP_FPS) if cap is not None else 0.0
-                source_frame_index = int(cap.get(cv2.CAP_PROP_POS_FRAMES)) if cap is not None else -1
-                print("VIDEO FPS:", fps)
-                print("FRAME INDEX:", source_frame_index)
 
                 if not ret or frame is None:
                     time.sleep(0.01)
@@ -211,9 +207,6 @@ class CaptureWorker:
             except Exception:
                 logger.exception("Error in capture loop")
                 time.sleep(0.1)
-            finally:
-                loop_end = time.time()
-                print("LOOP DURATION:", loop_end - loop_start)
 
         logger.info("Capture loop exited")
 

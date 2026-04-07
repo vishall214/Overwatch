@@ -13,7 +13,7 @@ export const API = {
   },
   video: {
     source: `${API_BASE}/video/source`,
-    demoList: (category: string) => `${API_BASE}/video/demo/list?type=${encodeURIComponent(category)}`,
+    demoList: (category: string) => `${API_BASE}/video/demo/list?category=${encodeURIComponent(category)}`,
     upload: `${API_BASE}/video/upload`,
     deleteUpload: (filename: string) => `${API_BASE}/video/upload/${encodeURIComponent(filename)}`,
     sourceInfo: `${API_BASE}/video/source/info`,

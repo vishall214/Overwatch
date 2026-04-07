@@ -74,7 +74,12 @@ async def get_modules() -> dict:
 
     Response example::
 
-        {"intrusion": true, "loitering": true, "crowd": true}
+        {
+          "intrusion": true,
+          "loitering": true,
+          "crowd": true,
+          "weapon_detection": true
+        }
     """
     return _get_controller().modules
 
@@ -88,7 +93,7 @@ async def enable_module(name: str) -> dict:
     """
     Enable an analytics module by name.
 
-    Valid names: intrusion, loitering, crowd.
+    Valid names: intrusion, loitering, crowd, weapon_detection.
     """
     ctrl = _get_controller()
     if name not in SUPPORTED_MODULES:
@@ -112,7 +117,7 @@ async def disable_module(name: str) -> dict:
     """
     Disable an analytics module by name.
 
-    Valid names: intrusion, loitering, crowd.
+    Valid names: intrusion, loitering, crowd, weapon_detection.
     """
     ctrl = _get_controller()
     if name not in SUPPORTED_MODULES:
@@ -134,21 +139,22 @@ async def disable_module(name: str) -> dict:
 @router.get("/status")
 async def system_status() -> dict:
     """
-    Return combined system health, pipeline FPS, active module
-    states, and total alert count.
+        Return combined system health, pipeline FPS, active module
+        states, and total alert count.
 
-    Response example::
+        Response example::
 
-        {
-          "camera_running": true,
-          "pipeline_fps": 4.8,
-          "active_modules": {
-            "intrusion": true,
-            "loitering": false,
-            "crowd": true
-          },
-          "alerts_total": 42
-        }
+                {
+                    "camera_running": true,
+                    "pipeline_fps": 4.8,
+                    "active_modules": {
+                        "intrusion": true,
+                        "loitering": false,
+                        "crowd": true,
+                        "weapon_detection": true
+                    },
+                    "alerts_total": 42
+                }
     """
     if _system_monitor is not None:
         return _system_monitor.get_system_status()
@@ -211,6 +217,9 @@ async def alert_stats() -> dict:
           "intrusion": 20,
           "loitering": 15,
           "crowd": 7,
+                    "weapon_detected": 2,
+                    "weapon_in_zone": 1,
+                    "dangerous_object": 3,
           "face_match": 0
         }
     """

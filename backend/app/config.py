@@ -6,6 +6,7 @@ Loaded from environment variables with sensible defaults.
 """
 
 from pydantic_settings import BaseSettings
+from pydantic import Field
 from typing import Optional
 
 
@@ -54,7 +55,7 @@ class Settings(BaseSettings):
 
     # ── Debug ────────────────────────────────────────────────────
     debug_detection_logs: bool = False
-    debug_zone_logs: bool = True
+    debug_zone_logs: bool = False
 
     # ── Streaming ────────────────────────────────────────────────
     stream_quality: int = 80  # JPEG encode quality (1-100)
@@ -85,10 +86,10 @@ class Settings(BaseSettings):
     enable_weapon_detection: bool = True
     weapon_model: str = "yolov8n.pt"  # Uses same pretrained COCO model
     weapon_confidence: float = 0.2
-    weapon_skip_frames: int = 3  # Run weapon inference every N frames
+    weapon_skip_frames: int = Field(default=3, ge=1)  # Run weapon inference every N frames
     weapon_consecutive_threshold: int = 2  # Consecutive detections before alert
     weapon_cooldown_seconds: float = 10.0  # Seconds between alerts for same object
-    weapon_classes: list[int] = [43, 76]  # COCO classes: 43=knife
+    weapon_classes: list[int] = [43, 76]  # COCO classes: 43=knife, 76=scissors
 
     model_config = {
         "env_prefix": "OVERWATCH_",

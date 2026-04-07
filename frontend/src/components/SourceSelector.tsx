@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { switchSource, listDemoVideos, uploadVideo, deleteUploadedVideo } from "../api/video";
 import { AlertCircle, Check, Loader, Trash2, Upload, Video } from "lucide-react";
@@ -15,10 +15,6 @@ export default function SourceSelector({ moduleType, onSourceChanged }: SourceSe
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadProgress,  setUploadProgress] = useState(0);
-
-  useEffect(() => {
-    console.log("UPLOADED STATE:", uploadedFilename);
-  }, [uploadedFilename]);
 
   // Fetch demo videos for this module
   const { data: demoList, isLoading: demoLoading } = useQuery({
@@ -56,7 +52,6 @@ export default function SourceSelector({ moduleType, onSourceChanged }: SourceSe
   const handleDemoSelect = async (videoName: string) => {
     setSelectedDemo(videoName);
     try {
-      console.log("SWITCH SOURCE:", { type: "demo", module: moduleType, name: videoName });
       await switchMutation.mutateAsync({
         type: "demo",
         module: moduleType,
@@ -81,11 +76,9 @@ export default function SourceSelector({ moduleType, onSourceChanged }: SourceSe
       setUploadError(null);
       setUploadProgress(50);
       const uploadResponse = await uploadVideo(file);
-      console.log("UPLOAD RESPONSE:", uploadResponse);
       setUploadedFilename(uploadResponse.filename);
       setUploadProgress(75);
 
-      console.log("SWITCH SOURCE:", { type: "upload", module: moduleType });
       await switchMutation.mutateAsync({
         type: "upload",
         module: moduleType,
@@ -115,7 +108,6 @@ export default function SourceSelector({ moduleType, onSourceChanged }: SourceSe
   // Handle live camera
   const handleLiveCamera = async () => {
     try {
-      console.log("SWITCH SOURCE:", { type: "camera", module: moduleType });
       await switchMutation.mutateAsync({
         type: "camera",
         module: moduleType,

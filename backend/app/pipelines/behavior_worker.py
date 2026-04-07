@@ -211,6 +211,9 @@ class BehaviorWorker:
         self._crowd_alerted = False
         self._crowd_alerted_zones.clear()
         self._event_states.clear()
+        self._weapon_state.clear()
+        self._weapon_cooldown.clear()
+        self._active_weapon_alerts.clear()
         self._face_match_alerted.clear()
         self._identity_cache.clear()
         self._pending_tracks.clear()
@@ -728,8 +731,20 @@ class BehaviorWorker:
                     weapon_dets = getattr(packet, 'weapon_detections', None)
                     if weapon_dets is not None:
                         weapon_detected = self._handle_weapon_detections(
-                            weapon_dets, now, packet.frame, behavior_events,
+                            weapon_dets,
+                            now,
+                            packet.frame,
+                            behavior_events,
+                            user_zones=user_zones,
+                            frame_w=frame_w,
+                            frame_h=frame_h,
+                            use_legacy=use_legacy,
                         )
+
+                weapon_in_zone_detected = any(
+                    alert.get("event_type") == "weapon_in_zone"
+                    for alert in self._active_weapon_alerts
+                )
 
                 # --- Draw zone overlay and alerts ---------------------
                 annotated = self._draw_zone_overlay(
@@ -740,7 +755,8 @@ class BehaviorWorker:
                     people_in_zone,
                     loiter_timers,
                     weapon_detected=(weapon_detected or bool(self._active_weapon_alerts)),
-                    user_zones,
+                    weapon_in_zone_detected=weapon_in_zone_detected,
+                    user_zones=user_zones,
                 )
 
                 # --- Draw face identity overlays ----------------------
@@ -826,7 +842,7 @@ class BehaviorWorker:
         people_in_zone: int,
         loiter_timers: dict[int, float],
         weapon_detected: bool = False,
-        user_zones: Optional[list[dict]] = None,
+        weapon_in_zone_detected: bool = False,
         user_zones: Optional[list[dict]] = None,
     ) -> np.ndarray:
         """
@@ -874,9 +890,11 @@ class BehaviorWorker:
 
         # Weapon alert (highest priority — rendered first at top)
         if weapon_detected:
+            weapon_text = "!! WEAPON IN ZONE !!" if weapon_in_zone_detected else "!! WEAPON DETECTED !!"
+            weapon_color = (0, 0, 255) if weapon_in_zone_detected else (182, 89, 155)
             cv2.putText(
-                annotated, "!! WEAPON DETECTED !!", (10, y_offset),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2,
+                annotated, weapon_text, (10, y_offset),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.9, weapon_color, 2,
             )
             y_offset += 35
 
@@ -974,21 +992,104 @@ class BehaviorWorker:
 
         return frame
 
+    @staticmethod
+    def _normalize_bbox(
+        bbox: list[float],
+        frame_w: int,
+        frame_h: int,
+    ) -> list[float]:
+        """Return bbox as normalized [x1, y1, x2, y2] in [0, 1] range."""
+        if len(bbox) != 4 or frame_w <= 0 or frame_h <= 0:
+            return [0.0, 0.0, 0.0, 0.0]
+
+        if max(bbox) <= 1.0:
+            x1, y1, x2, y2 = bbox
+        else:
+            x1 = bbox[0] / frame_w
+            y1 = bbox[1] / frame_h
+            x2 = bbox[2] / frame_w
+            y2 = bbox[3] / frame_h
+
+        return [
+            float(max(0.0, min(1.0, x1))),
+            float(max(0.0, min(1.0, y1))),
+            float(max(0.0, min(1.0, x2))),
+            float(max(0.0, min(1.0, y2))),
+        ]
+
+    @staticmethod
+    def _to_pixel_bbox(
+        bbox_norm: list[float],
+        frame_w: int,
+        frame_h: int,
+    ) -> list[float]:
+        """Convert normalized bbox into pixel coordinates."""
+        return [
+            bbox_norm[0] * frame_w,
+            bbox_norm[1] * frame_h,
+            bbox_norm[2] * frame_w,
+            bbox_norm[3] * frame_h,
+        ]
+
+    def _resolve_weapon_zone(
+        self,
+        bbox_px: list[float],
+        user_zones: list[dict],
+        frame_w: int,
+        frame_h: int,
+        use_legacy: bool,
+    ) -> tuple[bool, Optional[str], str]:
+        """Resolve whether a weapon bbox is inside a zone and return zone context."""
+        if use_legacy:
+            center = bbox_center(bbox_px)
+            in_legacy = point_in_polygon(center, self._zone_polygon)
+            return (in_legacy, "A" if in_legacy else None, "Zone A" if in_legacy else "")
+
+        matched_zone: Optional[dict] = None
+        best_iou = 0.0
+        for zone in user_zones:
+            if not rect_intersects_bbox(zone, bbox_px, frame_w, frame_h):
+                continue
+
+            zone_bbox_px = [
+                zone["x"] * frame_w,
+                zone["y"] * frame_h,
+                (zone["x"] + zone["width"]) * frame_w,
+                (zone["y"] + zone["height"]) * frame_h,
+            ]
+            overlap = self._bbox_iou(zone_bbox_px, bbox_px)
+            if matched_zone is None or overlap > best_iou:
+                matched_zone = zone
+                best_iou = overlap
+
+        if matched_zone is None:
+            return False, None, ""
+
+        zone_id = str(matched_zone.get("id"))
+        zone_name = matched_zone.get("name", f"Zone {zone_id}")
+        return True, zone_id, zone_name
+
     def _handle_weapon_detections(
         self,
         weapon_dets: list[dict],
         now: float,
         frame: np.ndarray,
         behavior_events: list[dict],
+        user_zones: Optional[list[dict]] = None,
+        frame_w: Optional[int] = None,
+        frame_h: Optional[int] = None,
+        use_legacy: Optional[bool] = None,
     ) -> bool:
         """
         Process weapon detections with temporal filtering and cooldown.
 
-        Uses a grid-based key (class_name + approximate bbox center) to
-        track the same weapon across frames. Only fires an alert after
-        the weapon is detected in at least `weapon_consecutive_threshold`
-        consecutive detection passes, with a configurable cooldown period
-        between repeated alerts for the same object.
+        Alerts are zone-aware:
+        - weapon_in_zone: weapon intersects a zone (critical)
+        - weapon_detected: weapon outside all zones (warning)
+
+        Cooldown keys are scoped by:
+        - class + zone_id when inside a zone
+        - class only when outside all zones
 
         Args:
             weapon_dets: List of weapon detection dicts from the current frame.
@@ -1000,6 +1101,15 @@ class BehaviorWorker:
         Returns:
             bool: True if any weapon alert was triggered this frame.
         """
+        if frame_w is None:
+            frame_w = int(frame.shape[1]) if frame.ndim >= 2 else 0
+        if frame_h is None:
+            frame_h = int(frame.shape[0]) if frame.ndim >= 2 else 0
+        if user_zones is None:
+            user_zones = []
+        if use_legacy is None:
+            use_legacy = len(user_zones) == 0
+
         alert_fired = False
         seen_keys: set[str] = set()
 
@@ -1007,12 +1117,24 @@ class BehaviorWorker:
             class_name = det.get("class_name", "unknown")
             bbox = det.get("bbox", [0, 0, 0, 0])
             confidence = det.get("confidence", 0.0)
-            cx = (bbox[0] + bbox[2]) / 2
-            cy = (bbox[1] + bbox[3]) / 2
-            # Grid center to 50px cells for approximate spatial matching
-            gx = int(cx // 50)
-            gy = int(cy // 50)
-            key = f"{class_name}_{gx}_{gy}"
+
+            bbox_norm = self._normalize_bbox(bbox, frame_w, frame_h)
+            bbox_px = self._to_pixel_bbox(bbox_norm, frame_w, frame_h)
+            in_zone, zone_id, zone_name = self._resolve_weapon_zone(
+                bbox_px=bbox_px,
+                user_zones=user_zones,
+                frame_w=frame_w,
+                frame_h=frame_h,
+                use_legacy=use_legacy,
+            )
+
+            event_type = "weapon_in_zone" if in_zone else "weapon_detected"
+            severity = "critical" if in_zone else "warning"
+            key = (
+                f"{class_name}_zone_{zone_id}"
+                if in_zone and zone_id is not None
+                else f"{class_name}_outside"
+            )
             seen_keys.add(key)
 
             if key not in self._weapon_state:
@@ -1020,13 +1142,19 @@ class BehaviorWorker:
                     "count": 0,
                     "confidence": 0.0,
                     "class_name": class_name,
-                    "bbox": bbox,
+                    "bbox": bbox_px,
+                    "event_type": event_type,
+                    "zone_id": zone_id,
+                    "zone_name": zone_name,
                 }
 
             state = self._weapon_state[key]
             state["count"] += 1
             state["confidence"] = confidence
-            state["bbox"] = bbox
+            state["bbox"] = bbox_px
+            state["event_type"] = event_type
+            state["zone_id"] = zone_id
+            state["zone_name"] = zone_name
 
             # Check if consecutive threshold is met
             if state["count"] >= self._weapon_consecutive_threshold:
@@ -1037,33 +1165,42 @@ class BehaviorWorker:
                     alert_fired = True
 
                     weapon_event = {
-                        "event_type": "dangerous_object",
+                        "event_type": event_type,
                         "object_type": class_name,
+                        "severity": severity,
                         "confidence": round(confidence, 3),
                         "bbox": bbox,
+                        "zone_id": zone_id if in_zone else None,
+                        "zone_name": zone_name if in_zone else "",
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
                     behavior_events.append(weapon_event)
 
                     self._publish_event(Event(
-                        type="DangerousObjectDetected",
+                        type=(
+                            "WeaponInZoneDetected"
+                            if in_zone
+                            else "WeaponDetected"
+                        ),
                         data=weapon_event,
                     ))
 
                     if self._alert_service is not None:
                         self._alert_service.create_alert(
-                            event_type="dangerous_object",
+                            event_type=event_type,
                             track_id=None,
-                            zone="",
+                            zone=zone_name if in_zone else "",
                             metadata=weapon_event,
                             frame=frame,
                         )
 
                     logger.warning(
-                        "DANGEROUS OBJECT: %s detected (confidence=%.2f, "
-                        "consecutive=%d, key=%s)",
+                        "WEAPON ALERT: type=%s class=%s confidence=%.2f "
+                        "zone=%s consecutive=%d key=%s",
+                        event_type,
                         class_name,
                         confidence,
+                        zone_name if zone_name else "outside",
                         state["count"],
                         key,
                     )
@@ -1108,10 +1245,13 @@ class BehaviorWorker:
 
         # Draw "WEAPON DETECTED" banner
         h, w = frame.shape[:2]
-        cv2.rectangle(frame, (0, h - 45), (w, h), (0, 0, 180), -1)
+        has_critical = any(a.get("event_type") == "weapon_in_zone" for a in self._active_weapon_alerts)
+        banner_colour = (0, 0, 180) if has_critical else (182, 89, 155)
+        banner_text = "!! WEAPON IN ZONE !!" if has_critical else "!! WEAPON DETECTED !!"
+        cv2.rectangle(frame, (0, h - 45), (w, h), banner_colour, -1)
         cv2.putText(
             frame,
-            "!! WEAPON DETECTED !!",
+            banner_text,
             (w // 2 - 160, h - 15),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.9,
@@ -1124,13 +1264,19 @@ class BehaviorWorker:
             x1, y1, x2, y2 = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
             class_name = alert["class_name"]
             confidence = alert["confidence"]
+            event_type = alert.get("event_type", "weapon_detected")
+            zone_name = alert.get("zone_name", "")
+            is_critical = event_type == "weapon_in_zone"
+            box_colour = (0, 0, 255) if is_critical else (182, 89, 155)
 
-            # Red bounding box with thicker border
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 3)
+            # Highlight critical weapon-in-zone with red and warning weapon with purple.
+            cv2.rectangle(frame, (x1, y1), (x2, y2), box_colour, 3)
 
             # Two-line label: "WEAPON" header + "Knife (0.87)" detail
-            line1 = "WEAPON"
+            line1 = "CRITICAL WEAPON" if is_critical else "WEAPON WARNING"
             line2 = f"{class_name.capitalize()} ({confidence:.2f})"
+            if zone_name:
+                line2 = f"{line2} @ {zone_name}"
             font = cv2.FONT_HERSHEY_SIMPLEX
             (tw1, th1), _ = cv2.getTextSize(line1, font, 0.7, 2)
             (tw2, th2), _ = cv2.getTextSize(line2, font, 0.55, 1)
@@ -1139,7 +1285,7 @@ class BehaviorWorker:
 
             # Label background
             cv2.rectangle(
-                frame, (x1, y1 - label_h), (x1 + label_w, y1), (0, 0, 255), -1,
+                frame, (x1, y1 - label_h), (x1 + label_w, y1), box_colour, -1,
             )
             # Line 1: "WEAPON" (bold white)
             cv2.putText(

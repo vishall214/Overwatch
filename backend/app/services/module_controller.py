@@ -8,6 +8,7 @@ Supported modules:
     - intrusion : Intrusion zone detection
     - loitering : Loitering time detection
     - crowd     : Crowd count detection
+    - weapon_detection : Dangerous object detection
 
 State changes are thread-safe. Workers read module state as a
 plain boolean dict snapshot — near-zero per-frame overhead.

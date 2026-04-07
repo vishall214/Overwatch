@@ -28,11 +28,11 @@ export default function Weapons() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-ow-mist/55">
           <div className="p-3 rounded-xl bg-ow-teal/8 border border-[rgba(255,255,255,0.04)]">
             <span className="text-ow-mist/30 text-xs uppercase tracking-wider">How it works</span>
-            <p className="mt-1">A dedicated YOLO model runs parallel inference to identify knives, guns, and other dangerous objects in the scene.</p>
+            <p className="mt-1">A configured YOLO model runs cadence-based inference for dangerous-object classes (knife/scissors, normalized to knife labels in alerts).</p>
           </div>
           <div className="p-3 rounded-xl bg-ow-teal/8 border border-[rgba(255,255,255,0.04)]">
             <span className="text-ow-mist/30 text-xs uppercase tracking-wider">Model</span>
-            <p className="mt-1">Separate weapon-trained YOLO model with temporal filtering — 5 consecutive detections required before alert.</p>
+            <p className="mt-1">Temporal filtering is applied before alerting; by default, 2 consecutive detections are required before an alert is raised.</p>
           </div>
           <div className="p-3 rounded-xl bg-ow-teal/8 border border-[rgba(255,255,255,0.04)]">
             <span className="text-ow-mist/30 text-xs uppercase tracking-wider">Response</span>

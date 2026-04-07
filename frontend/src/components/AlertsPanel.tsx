@@ -3,13 +3,15 @@ import gsap from "gsap";
 import { useAlerts } from "../hooks/useAlerts";
 import { API } from "../api/config";
 import { AlertTriangle, ShieldAlert, Users, Eye, Crosshair, UserCheck } from "lucide-react";
+import { formatEventLabel, isWeaponEventType, normalizeEventType } from "../utils/normalization";
 
 const eventConfig: Record<string, { icon: typeof AlertTriangle; color: string }> = {
-  intrusion: { icon: ShieldAlert, color: "text-ow-alert-intrusion" },
-  loitering: { icon: Eye, color: "text-ow-alert-loitering" },
-  crowd: { icon: Users, color: "text-ow-alert-crowd" },
-  dangerous_object: { icon: Crosshair, color: "text-red-500" },
-  face_match: { icon: UserCheck, color: "text-ow-accent" },
+  intrusion: { icon: ShieldAlert, color: "#e74c3c" },
+  loitering: { icon: Eye, color: "#f39c12" },
+  crowd: { icon: Users, color: "#3498db" },
+  weapon_in_zone: { icon: Crosshair, color: "#e74c3c" },
+  weapon_detected: { icon: Crosshair, color: "#9b59b6" },
+  face_match: { icon: UserCheck, color: "#52c9a8" },
 };
 
 export default function AlertsPanel() {
@@ -45,16 +47,17 @@ export default function AlertsPanel() {
 
   const alerts = (data?.alerts ?? []).slice(0, MAX_VISIBLE_ALERTS);
 
-  // Priority sort: weapon > intrusion > loitering > crowd > other
+  // Priority sort: critical weapon > warning weapon > intrusion > loitering > crowd > other
   const priority: Record<string, number> = {
-    dangerous_object: 0,
-    intrusion: 1,
-    loitering: 2,
-    crowd: 3,
+    weapon_in_zone: 0,
+    weapon_detected: 1,
+    intrusion: 2,
+    loitering: 3,
+    crowd: 4,
   };
   const sorted = [...alerts].sort((a, b) => {
-    const pa = priority[a.event_type] ?? 9;
-    const pb = priority[b.event_type] ?? 9;
+    const pa = priority[normalizeEventType(a.event_type)] ?? 9;
+    const pb = priority[normalizeEventType(b.event_type)] ?? 9;
     if (pa !== pb) return pa - pb;
     return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
   });
@@ -66,16 +69,20 @@ export default function AlertsPanel() {
           <div className="text-center text-ow-mist/30 text-sm py-6">No alerts detected</div>
         ) : (
           sorted.map((alert) => {
-            const cfg = eventConfig[alert.event_type] ?? { icon: AlertTriangle, color: "text-ow-accent" };
+            const normalizedType = normalizeEventType(alert.event_type);
+            const cfg = eventConfig[normalizedType] ?? { icon: AlertTriangle, color: "#52c9a8" };
             const Icon = cfg.icon;
             const snapshotFile = alert.snapshot_path?.split("/").pop() ?? "";
-            const isWeapon = alert.event_type === "dangerous_object";
+            const isWeapon = isWeaponEventType(alert.event_type);
+            const isCriticalWeapon = normalizedType === "weapon_in_zone";
             return (
               <div
                 key={alert.id}
                 className={`alert-card flex items-start gap-3 p-3 rounded-xl transition-all duration-200 cursor-default group ${
-                  isWeapon
+                  isCriticalWeapon
                     ? "bg-red-500/10 border-2 border-red-500/30 hover:bg-red-500/15 hover:border-red-500/50 shadow-[0_0_12px_rgba(239,68,68,0.15)]"
+                    : isWeapon
+                    ? "bg-[rgba(155,89,182,0.12)] border-2 border-[rgba(155,89,182,0.35)] hover:bg-[rgba(155,89,182,0.18)] hover:border-[rgba(155,89,182,0.55)] shadow-[0_0_12px_rgba(155,89,182,0.18)]"
                     : "bg-ow-teal/8 border border-[rgba(255,255,255,0.05)] hover:bg-ow-teal/15 hover:border-ow-accent/15"
                 }`}
               >
@@ -89,19 +96,27 @@ export default function AlertsPanel() {
                 )}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <Icon className={`w-3.5 h-3.5 ${cfg.color}`} />
+                    <Icon className="w-3.5 h-3.5" style={{ color: cfg.color }} />
                     <span className="text-sm font-medium capitalize text-ow-light/90">
-                      {alert.event_type === "dangerous_object" ? "Weapon" : alert.event_type}
+                      {formatEventLabel(normalizedType)}
                     </span>
-                    {alert.event_type === "dangerous_object" && typeof alert.metadata?.object_type === "string" ? (
-                      <span className="px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-400 text-[9px] font-bold uppercase">
+                    {isWeapon && typeof alert.metadata?.object_type === "string" ? (
+                      <span
+                        className="px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase"
+                        style={{
+                          color: isCriticalWeapon ? "#e74c3c" : "#9b59b6",
+                          backgroundColor: isCriticalWeapon
+                            ? "rgba(231,76,60,0.15)"
+                            : "rgba(155,89,182,0.15)",
+                        }}
+                      >
                         {alert.metadata.object_type}
                       </span>
                     ) : null}
                   </div>
                   <div className="text-xs text-ow-mist/50 mt-0.5">
-                    {alert.event_type === "dangerous_object"
-                      ? `Confidence: ${
+                    {isWeapon
+                      ? `${normalizedType === "weapon_in_zone" ? `Zone: ${(alert.metadata?.zone_name as string) || alert.zone || "—"} · ` : ""}Confidence: ${
                           typeof alert.metadata?.confidence === "number"
                             ? `${(Number(alert.metadata.confidence) * 100).toFixed(0)}%`
                             : "—"

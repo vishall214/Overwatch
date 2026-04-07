@@ -254,7 +254,7 @@ def get_alert_summary(
         range_hours: Time window in hours (default: 24).
 
     Returns:
-        Dict with total, intrusion, loitering, crowd counts.
+        Dict with total, intrusion, loitering, crowd, weapon and face counts.
     """
     if range_hours < 1 or range_hours > 24:
         range_hours = 24
@@ -268,12 +268,21 @@ def get_alert_summary(
 
     # Distribution by type
     distribution = get_event_distribution(db, range_hours)
+    legacy_weapon = distribution.get("dangerous_object", 0)
+    weapon_detected = distribution.get("weapon_detected", 0) + legacy_weapon
+    weapon_in_zone = distribution.get("weapon_in_zone", 0)
+    weapon_total = weapon_detected + weapon_in_zone
 
     return {
         "total": total,
         "intrusion": distribution.get("intrusion", 0),
         "loitering": distribution.get("loitering", 0),
         "crowd": distribution.get("crowd", 0),
+        "weapon_detected": weapon_detected,
+        "weapon_in_zone": weapon_in_zone,
+        # Keep legacy key for backward compatibility with older clients.
+        "dangerous_object": weapon_total,
+        "face_match": distribution.get("face_match", 0),
     }
 
 

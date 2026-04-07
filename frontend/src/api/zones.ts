@@ -35,16 +35,13 @@ export async function fetchZones(): Promise<ZoneListResponse> {
 }
 
 export async function createZone(payload: ZoneCreatePayload): Promise<Zone> {
-  console.log("ZONE API PAYLOAD:", payload);
   const res = await fetch(API.zones.create, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error("Failed to create zone");
-  const created = await res.json();
-  console.log("ZONE API RESPONSE:", created);
-  return created;
+  return res.json();
 }
 
 export async function deleteZone(id: number): Promise<void> {

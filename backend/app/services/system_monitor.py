@@ -72,7 +72,12 @@ class SystemMonitor:
 
         active_modules = (
             self._modules.modules if self._modules is not None
-            else {"intrusion": True, "loitering": True, "crowd": True}
+            else {
+                "intrusion": True,
+                "loitering": True,
+                "crowd": True,
+                "weapon_detection": True,
+            }
         )
 
         return {
@@ -119,12 +124,20 @@ class SystemMonitor:
                 .all()
             )
             counts = {event_type: count for event_type, count in rows}
+            legacy_weapon = counts.get("dangerous_object", 0)
+            weapon_detected = counts.get("weapon_detected", 0) + legacy_weapon
+            weapon_in_zone = counts.get("weapon_in_zone", 0)
+            weapon_total = weapon_detected + weapon_in_zone
             total = sum(counts.values())
             return {
                 "total_alerts": total,
                 "intrusion": counts.get("intrusion", 0),
                 "loitering": counts.get("loitering", 0),
                 "crowd": counts.get("crowd", 0),
+                "weapon_detected": weapon_detected,
+                "weapon_in_zone": weapon_in_zone,
+                # Keep legacy key for backward compatibility with older clients.
+                "dangerous_object": weapon_total,
                 "face_match": counts.get("face_match", 0),
             }
         finally:
