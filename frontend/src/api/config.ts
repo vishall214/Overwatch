@@ -23,7 +23,9 @@ export const API = {
       `${API_BASE}/analytics/alerts-over-time?interval=${interval}&range_=${range}`,
     distribution: (range: string) => `${API_BASE}/analytics/distribution?range_=${range}`,
     summary: (range: string) => `${API_BASE}/analytics/summary?range_=${range}`,
-    recent: (limit: number) => `${API_BASE}/analytics/recent?limit=${limit}`,
+    recent: (limit: number, range: string) => `${API_BASE}/analytics/recent?limit=${limit}&range_=${range}`,
+    threat: (range: string, limit: number) =>
+      `${API_BASE}/analytics/threat?range_=${range}&limit=${limit}`,
   },
   alerts: {
     list: `${API_BASE}/alerts`,
@@ -37,6 +39,13 @@ export const API = {
     metrics: `${API_BASE}/system/metrics`,
   },
   snapshots: (filename: string) => `${API_BASE}/snapshots/${encodeURIComponent(filename)}`,
+  reports: {
+    list: (limit: number) => `${API_BASE}/reports?limit=${limit}`,
+    generate: (period: string) => `${API_BASE}/reports/generate?period=${encodeURIComponent(period)}`,
+    details: (reportId: string) => `${API_BASE}/reports/${encodeURIComponent(reportId)}`,
+    download: (reportId: string) => `${API_BASE}/reports/${encodeURIComponent(reportId)}/download`,
+    scheduler: `${API_BASE}/reports/scheduler`,
+  },
   upload: `${API_BASE}/upload-video`,
   zones: {
     list: `${API_BASE}/zones`,

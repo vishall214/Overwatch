@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException
 
 from app.schemas.alert_schema import AlertListResponse, AlertResponse
 from app.services.alert_service import AlertService
+from app.utils.snapshot_utils import build_snapshot_url, extract_snapshot_filename
 
 logger = logging.getLogger(__name__)
 
@@ -48,18 +49,26 @@ async def list_alerts(limit: int = 100) -> AlertListResponse:
     """
     service = _get_alert_service()
     rows = service.get_alerts(limit=limit)
-    alerts = [
-        AlertResponse(
-            id=r.id,
-            event_type=r.event_type,
-            timestamp=r.timestamp,
-            track_id=r.track_id,
-            zone=r.zone or "",
-            metadata=r.metadata_ or {},
-            snapshot_path=r.snapshot_path or "",
+    alerts = []
+    for r in rows:
+        metadata = r.metadata_ or {}
+        snapshot_path = r.snapshot_path or ""
+        snapshot_filename = extract_snapshot_filename(snapshot_path)
+        alerts.append(
+            AlertResponse(
+                id=r.id,
+                event_type=r.event_type,
+                timestamp=r.timestamp,
+                track_id=r.track_id,
+                zone=r.zone or "",
+                metadata=metadata,
+                snapshot_path=snapshot_path,
+                snapshot_filename=snapshot_filename,
+                snapshot_url=build_snapshot_url(snapshot_filename),
+                threat_score=int(metadata.get("threat_score", 0)),
+                threat_level=str(metadata.get("threat_level", "LOW")),
+            )
         )
-        for r in rows
-    ]
     return AlertListResponse(
         alerts=alerts,
         total=service.get_alert_count(),

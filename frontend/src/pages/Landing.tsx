@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { Eye, Shield, Brain, Cpu, Activity, ChevronRight, Radar, Lock } from "lucide-react";
+import { colors } from "../theme/colors";
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -11,37 +12,37 @@ const features = [
     icon: Shield,
     title: "Intrusion Detection",
     desc: "AI-powered zone breach detection with instant alerts and snapshot capture.",
-    color: "from-ow-alert-intrusion to-red-600",
+    color: "from-threat-critical to-threat-high",
   },
   {
     icon: Eye,
     title: "Loitering Analysis",
     desc: "Behavioral analysis identifies individuals lingering in restricted areas.",
-    color: "from-ow-alert-loitering to-orange-600",
+    color: "from-threat-high to-threat-medium",
   },
   {
     icon: Radar,
     title: "Crowd Monitoring",
     desc: "Real-time crowd density estimation with configurable thresholds.",
-    color: "from-ow-alert-crowd to-blue-600",
+    color: "from-threat-info to-accent",
   },
   {
     icon: Brain,
     title: "Deep Learning Pipeline",
     desc: "YOLOv8-based inference with multi-stage asynchronous processing.",
-    color: "from-ow-teal to-ow-accent-dim",
+    color: "from-accent to-threat-info",
   },
   {
     icon: Lock,
     title: "Face Recognition",
     desc: "Real-time face matching against registered identity database.",
-    color: "from-ow-accent to-ow-accent-dim",
+    color: "from-accent to-threat-low",
   },
   {
     icon: Activity,
     title: "Live Analytics",
     desc: "Real-time dashboards with alert statistics and pipeline metrics.",
-    color: "from-ow-mist to-ow-teal",
+    color: "from-textSecondary to-accent",
   },
 ];
 
@@ -61,7 +62,6 @@ export default function Landing() {
   const ctaRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // Subtle particle field
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -76,6 +76,7 @@ export default function Landing() {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
     };
+
     resize();
     window.addEventListener("resize", resize);
 
@@ -99,13 +100,17 @@ export default function Landing() {
         if (p.x > canvas.width) p.x = 0;
         if (p.y < 0) p.y = canvas.height;
         if (p.y > canvas.height) p.y = 0;
+
+        ctx.globalAlpha = p.a;
+        ctx.fillStyle = colors.accent;
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(43,182,201,${p.a})`;
         ctx.fill();
       }
+      ctx.globalAlpha = 1;
       raf = requestAnimationFrame(draw);
     };
+
     raf = requestAnimationFrame(draw);
 
     return () => {
@@ -115,8 +120,7 @@ export default function Landing() {
   }, []);
 
   useEffect(() => {
-    const ctx = gsap.context(() => {
-      // Hero animation
+    const gsapContext = gsap.context(() => {
       const heroTl = gsap.timeline();
       heroTl
         .fromTo(".hero-badge", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" })
@@ -125,7 +129,6 @@ export default function Landing() {
         .fromTo(".hero-cta", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.5, ease: "power3.out" }, "-=0.3")
         .fromTo(".hero-visual", { opacity: 0, scale: 0.9 }, { opacity: 1, scale: 1, duration: 1, ease: "power2.out" }, "-=0.5");
 
-      // Feature cards
       gsap.utils.toArray<HTMLElement>(".feature-card").forEach((card, i) => {
         gsap.fromTo(
           card,
@@ -145,7 +148,6 @@ export default function Landing() {
         );
       });
 
-      // Tech section
       gsap.fromTo(
         ".tech-card",
         { opacity: 0, y: 40 },
@@ -163,7 +165,6 @@ export default function Landing() {
         }
       );
 
-      // CTA section
       gsap.fromTo(
         ctaRef.current,
         { opacity: 0, y: 40 },
@@ -181,73 +182,63 @@ export default function Landing() {
       );
     });
 
-    return () => ctx.revert();
+    return () => gsapContext.revert();
   }, []);
 
   return (
-    <div className="min-h-screen bg-ow-bg overflow-x-hidden">
-      {/* Particle canvas */}
+    <div className="min-h-screen bg-bg overflow-x-hidden">
       <canvas ref={canvasRef} className="fixed inset-0 pointer-events-none z-0" />
 
-      {/* Ambient background */}
       <div className="fixed inset-0 pointer-events-none z-0">
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-ow-accent/5 rounded-full blur-[120px]" />
-        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-ow-teal/8 rounded-full blur-[120px]" />
+        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-accent/10 rounded-full blur-[120px]" />
+        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-threat-info/10 rounded-full blur-[120px]" />
       </div>
 
-      {/* ──── Nav ──── */}
       <nav className="relative z-20 flex items-center justify-between px-8 py-5 max-w-7xl mx-auto">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-ow-accent to-ow-accent-dim flex items-center justify-center shadow-glow">
-            <Eye className="w-5 h-5 text-ow-bg" />
+          <div className="w-9 h-9 rounded-xl bg-accent flex items-center justify-center">
+            <Eye className="w-5 h-5 text-bg" />
           </div>
-          <span className="text-xl font-bold tracking-widest text-ow-accent">
-            OVERWATCH
-          </span>
+          <span className="text-xl font-bold tracking-widest text-accent">OVERWATCH</span>
         </div>
         <div className="flex items-center gap-3">
           <Link
             to="/login"
-            className="px-4 py-2 text-sm text-ow-mist/60 hover:text-ow-light/90 transition-colors"
+            className="px-4 py-2 text-sm text-textSecondary hover:text-textPrimary transition-colors"
           >
             Sign In
           </Link>
           <Link
             to="/signup"
-            className="px-4 py-2 rounded-xl border border-ow-accent/20 text-sm font-semibold text-ow-accent
-                       hover:border-ow-accent/40 hover:bg-ow-accent/8 transition-all"
+            className="px-4 py-2 rounded-xl border border-border text-sm font-semibold text-accent hover:bg-card transition-colors"
           >
             Signup
           </Link>
           <Link
             to="/dashboard"
-            className="px-5 py-2 rounded-xl bg-gradient-to-r from-ow-accent to-ow-accent-dim text-sm font-semibold text-ow-bg
-                       hover:shadow-glow-hover transition-all"
+            className="px-5 py-2 rounded-xl bg-accent text-sm font-semibold text-bg hover:bg-accent/90 transition-colors"
           >
             Open Dashboard
           </Link>
         </div>
       </nav>
 
-      {/* ──── Hero Section ──── */}
       <section ref={heroRef} className="relative z-10 max-w-7xl mx-auto px-8 pt-20 pb-32">
         <div className="text-center max-w-4xl mx-auto">
-          <div className="hero-badge inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-ow-accent/12 border border-ow-accent/25 mb-8">
-            <Cpu className="w-3.5 h-3.5 text-ow-accent" />
-            <span className="text-xs font-semibold text-ow-accent uppercase tracking-wide">AI Vision Monitoring</span>
+          <div className="hero-badge inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-accent/10 border border-accent/30 mb-8">
+            <Cpu className="w-3.5 h-3.5 text-accent" />
+            <span className="text-xs font-semibold text-accent uppercase tracking-wide">AI Vision Monitoring</span>
           </div>
 
           <h1 className="hero-title text-6xl md:text-7xl font-black leading-tight mb-6">
-            <span className="text-ow-light"> An AI Powered</span>
+            <span className="text-textPrimary">An AI Powered</span>
             <br />
-            <span className="bg-gradient-to-r from-ow-accent via-ow-accent-dim to-ow-accent bg-clip-text text-transparent">
-              Surveillance and Monitoring system
+            <span className="bg-gradient-to-r from-accent via-threat-info to-accent bg-clip-text text-transparent">
+              Surveillance and Monitoring System
             </span>
-            <br />
-            <span className="text-ow-light/80"></span>
           </h1>
 
-          <p className="hero-subtitle text-lg text-ow-mist/60 max-w-2xl mx-auto mb-10 leading-relaxed">
+          <p className="hero-subtitle text-lg text-textSecondary max-w-2xl mx-auto mb-10 leading-relaxed">
             Real-time threat detection, behavioral analysis, and intelligent monitoring
             for modern environments.
           </p>
@@ -255,46 +246,42 @@ export default function Landing() {
           <div className="hero-cta flex items-center justify-center gap-4">
             <Link
               to="/dashboard"
-              className="group px-8 py-3.5 rounded-xl glass-panel border border-ow-accent/30 text-sm font-semibold text-ow-accent
-                         hover:bg-ow-accent/15 hover:shadow-glow-hover hover:border-ow-accent/50 transition-all flex items-center gap-2"
+              className="group px-8 py-3.5 rounded-xl bg-accent text-sm font-semibold text-bg hover:bg-accent/90 transition-colors flex items-center gap-2"
             >
               Open Dashboard
               <ChevronRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
             </Link>
             <Link
               to="/signup"
-              className="px-8 py-3.5 rounded-xl border border-ow-accent/20 text-sm font-semibold text-ow-accent
-                         hover:border-ow-accent/40 hover:bg-ow-accent/8 transition-all"
+              className="px-8 py-3.5 rounded-xl border border-border text-sm font-semibold text-textPrimary hover:bg-card transition-colors"
             >
               Signup
             </Link>
           </div>
-
         </div>
 
-        {/* Hero visual — glass dashboard preview */}
-        <div className="hero-visual mt-20 rounded-3xl glass-panel-heavy p-6 shadow-2xl max-w-5xl mx-auto">
+        <div className="hero-visual mt-20 panel-base rounded-3xl p-6 max-w-5xl mx-auto">
           <div className="grid grid-cols-3 gap-4">
-            <div className="col-span-2 h-64 rounded-2xl bg-gradient-to-br from-ow-surface to-ow-bg border border-[rgba(255,255,255,0.04)] flex items-center justify-center">
+            <div className="col-span-2 h-64 rounded-2xl border border-border bg-surface flex items-center justify-center">
               <div className="text-center">
-                <Eye className="w-12 h-12 text-ow-accent/20 mx-auto mb-3" />
-                <p className="text-sm text-ow-mist/20">Live Camera Feed</p>
+                <Eye className="w-12 h-12 text-accent/30 mx-auto mb-3" />
+                <p className="text-sm text-textSecondary">Live Camera Feed</p>
               </div>
             </div>
             <div className="space-y-4">
-              <div className="h-[120px] rounded-2xl bg-ow-teal/8 border border-[rgba(255,255,255,0.04)] p-4">
-                <div className="text-xs text-ow-mist/30 uppercase tracking-wider mb-2">Alerts</div>
+              <div className="h-[120px] card-base">
+                <div className="text-xs text-textMuted uppercase tracking-wider mb-2">Alerts</div>
                 <div className="space-y-2">
                   {[1, 2, 3].map((i) => (
-                    <div key={i} className="h-4 rounded bg-ow-teal/10" />
+                    <div key={i} className="h-4 rounded bg-surface" />
                   ))}
                 </div>
               </div>
-              <div className="h-[120px] rounded-2xl bg-ow-teal/8 border border-[rgba(255,255,255,0.04)] p-4">
-                <div className="text-xs text-ow-mist/30 uppercase tracking-wider mb-2">Status</div>
+              <div className="h-[120px] card-base">
+                <div className="text-xs text-textMuted uppercase tracking-wider mb-2">Status</div>
                 <div className="space-y-2">
                   {[1, 2, 3].map((i) => (
-                    <div key={i} className="h-4 rounded bg-ow-teal/10" />
+                    <div key={i} className="h-4 rounded bg-surface" />
                   ))}
                 </div>
               </div>
@@ -303,11 +290,10 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* ──── Features ──── */}
       <section ref={featuresRef} className="relative z-10 max-w-7xl mx-auto px-8 py-24">
         <div className="text-center mb-16">
-          <h2 className="text-3xl font-bold text-ow-light/90 mb-4">Detection Capabilities</h2>
-          <p className="text-ow-mist/50 max-w-xl mx-auto">
+          <h2 className="text-3xl font-bold text-textPrimary mb-4">Detection Capabilities</h2>
+          <p className="text-textSecondary max-w-xl mx-auto">
             Multi-modal threat detection powered by state-of-the-art deep learning models.
           </p>
         </div>
@@ -315,25 +301,24 @@ export default function Landing() {
           {features.map((f) => (
             <div
               key={f.title}
-              className="feature-card group rounded-2xl glass-panel
-                         p-6 hover:bg-ow-teal/15 hover:border-ow-accent/15 transition-all duration-300 cursor-default"
+              className="feature-card group panel-base rounded-2xl p-6 hover:bg-card transition-colors duration-300 cursor-default"
             >
-              <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${f.color} flex items-center justify-center mb-4
-                              group-hover:shadow-lg transition-shadow`}>
-                <f.icon className="w-5 h-5 text-white" />
+              <div
+                className={`w-10 h-10 rounded-xl bg-gradient-to-br ${f.color} flex items-center justify-center mb-4 group-hover:scale-105 transition-transform`}
+              >
+                <f.icon className="w-5 h-5 text-bg" />
               </div>
-              <h3 className="text-lg font-semibold text-ow-light/90 mb-2">{f.title}</h3>
-              <p className="text-sm text-ow-mist/45 leading-relaxed">{f.desc}</p>
+              <h3 className="text-lg font-semibold text-textPrimary mb-2">{f.title}</h3>
+              <p className="text-sm text-textSecondary leading-relaxed">{f.desc}</p>
             </div>
           ))}
         </div>
       </section>
 
-      {/* ──── Tech Stack ──── */}
       <section ref={techRef} className="relative z-10 max-w-7xl mx-auto px-8 py-24">
         <div className="text-center mb-16">
-          <h2 className="text-3xl font-bold text-ow-light/90 mb-4">Technology Stack</h2>
-          <p className="text-ow-mist/50 max-w-xl mx-auto">
+          <h2 className="text-3xl font-bold text-textPrimary mb-4">Technology Stack</h2>
+          <p className="text-textSecondary max-w-xl mx-auto">
             Built on proven, production-grade frameworks and models.
           </p>
         </div>
@@ -341,27 +326,24 @@ export default function Landing() {
           {techStack.map((t) => (
             <div
               key={t.name}
-              className="tech-card text-center p-5 rounded-2xl glass-panel
-                         hover:bg-ow-teal/15 hover:border-ow-accent/15 transition-all duration-200"
+              className="tech-card text-center card-base hover:bg-surface transition-colors duration-200"
             >
-              <div className="text-sm font-semibold text-ow-light/80 mb-1">{t.name}</div>
-              <div className="text-xs text-ow-mist/35">{t.detail}</div>
+              <div className="text-sm font-semibold text-textPrimary mb-1">{t.name}</div>
+              <div className="text-xs text-textSecondary">{t.detail}</div>
             </div>
           ))}
         </div>
       </section>
 
-      {/* ──── CTA ──── */}
       <section ref={ctaRef} className="relative z-10 max-w-4xl mx-auto px-8 py-24 text-center">
-        <div className="rounded-3xl bg-gradient-to-br from-ow-accent/8 to-ow-teal/10 backdrop-blur-xl border border-ow-accent/10 p-12">
-          <h2 className="text-3xl font-bold text-ow-light/90 mb-4">Ready to Monitor?</h2>
-          <p className="text-ow-mist/50 mb-8 max-w-lg mx-auto">
+        <div className="rounded-3xl bg-gradient-to-br from-accent/10 to-threat-info/10 border border-border p-12">
+          <h2 className="text-3xl font-bold text-textPrimary mb-4">Ready to Monitor?</h2>
+          <p className="text-textSecondary mb-8 max-w-lg mx-auto">
             Access the live dashboard, configure detection modules, and start protecting your environment.
           </p>
           <Link
             to="/dashboard"
-            className="inline-flex items-center gap-2 px-8 py-3.5 rounded-xl bg-gradient-to-r from-ow-accent to-ow-accent-dim
-                       text-sm font-semibold text-ow-bg hover:shadow-glow-hover transition-all"
+            className="inline-flex items-center gap-2 px-8 py-3.5 rounded-xl bg-accent text-sm font-semibold text-bg hover:bg-accent/90 transition-colors"
           >
             Launch Dashboard
             <ChevronRight className="w-4 h-4" />
@@ -369,9 +351,8 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="relative z-10 border-t border-[rgba(255,255,255,0.05)] py-8 text-center">
-        <p className="text-xs text-ow-mist/20 font-mono">OVERWATCH Surveillance System — v2.0</p>
+      <footer className="relative z-10 py-8 text-center">
+        <p className="text-xs text-textMuted font-mono">OVERWATCH Surveillance System - v2.0</p>
       </footer>
     </div>
   );

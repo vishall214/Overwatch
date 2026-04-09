@@ -5,14 +5,15 @@ import { AuthProvider, useAuth } from "./context/AuthContext";
 import Sidebar from "./components/Sidebar";
 import Topbar from "./components/Topbar";
 
-import Landing from "./pages/Landing";
-import Dashboard from "./pages/Dashboard";
+import Landing from "./pages/Landing.tsx";
+import Monitor from "./pages/Monitor.tsx";
 import Intrusion from "./pages/Intrusion";
 import Loitering from "./pages/Loitering";
 import Crowd from "./pages/Crowd";
 import Weapons from "./pages/Weapons";
 import Alerts from "./pages/Alerts";
 import Analytics from "./pages/Analytics";
+import Reports from "./pages/Reports.tsx";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 
@@ -46,32 +47,76 @@ function AppLayout() {
 
   return (
     <>
-      <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed((c) => !c)} />
+      {showShell && <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed((c) => !c)} />}
       {showShell && <Topbar collapsed={sidebarCollapsed} />}
       <main
-        className={showShell ? "mt-14 p-5 min-h-[calc(100vh-56px)] transition-all duration-300" : ""}
+        className={showShell ? "mt-14 p-5 min-h-[calc(100vh-56px)] transition-all duration-300 app-shell-bg text-textPrimary" : "min-h-screen app-shell-bg text-textPrimary"}
         style={showShell ? { marginLeft: sidebarCollapsed ? 68 : 220 } : undefined}
       >
         <Routes>
           <Route path="/" element={<Landing />} />
+          <Route path="/dashboard" element={<Navigate to="/monitor" replace />} />
           <Route
-            path="/dashboard"
+            path="/monitor"
             element={
               <ProtectedRoute>
-                <Dashboard />
+                <Monitor />
               </ProtectedRoute>
             }
           />
-          <Route path="/intrusion" element={<Intrusion />} />
-          <Route path="/loitering" element={<Loitering />} />
-          <Route path="/crowd" element={<Crowd />} />
-          <Route path="/weapons" element={<Weapons />} />
-          <Route path="/alerts" element={<Alerts />} />
+          <Route
+            path="/intrusion"
+            element={
+              <ProtectedRoute>
+                <Intrusion />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/loitering"
+            element={
+              <ProtectedRoute>
+                <Loitering />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/crowd"
+            element={
+              <ProtectedRoute>
+                <Crowd />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/weapons"
+            element={
+              <ProtectedRoute>
+                <Weapons />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/alerts"
+            element={
+              <ProtectedRoute>
+                <Alerts />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/analytics"
             element={
               <ProtectedRoute>
                 <Analytics />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/reports"
+            element={
+              <ProtectedRoute>
+                <Reports />
               </ProtectedRoute>
             }
           />

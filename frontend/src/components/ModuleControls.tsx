@@ -4,10 +4,10 @@ import { useModules, useToggleModule } from "../hooks/useModules";
 import { ShieldAlert, Eye, Users, Crosshair } from "lucide-react";
 
 const moduleConfig = [
-  { name: "intrusion", label: "Intrusion Detection", icon: ShieldAlert, color: "text-ow-alert-intrusion" },
-  { name: "loitering", label: "Loitering Detection", icon: Eye, color: "text-ow-alert-loitering" },
-  { name: "crowd", label: "Crowd Detection", icon: Users, color: "text-ow-alert-crowd" },
-  { name: "weapon_detection", label: "Weapon Detection", icon: Crosshair, color: "text-red-500" },
+  { name: "intrusion", label: "Intrusion Detection", icon: ShieldAlert, color: "text-threat-critical" },
+  { name: "loitering", label: "Loitering Detection", icon: Eye, color: "text-threat-high" },
+  { name: "crowd", label: "Crowd Detection", icon: Users, color: "text-threat-info" },
+  { name: "weapon_detection", label: "Weapon Detection", icon: Crosshair, color: "text-threat-critical" },
 ] as const;
 
 export default function ModuleControls() {
@@ -15,11 +15,11 @@ export default function ModuleControls() {
   const toggleMutation = useToggleModule();
 
   return (
-    <div className="glass-panel rounded-2xl p-4 h-full">
-      <h3 className="text-sm font-semibold text-ow-mist/70 uppercase tracking-wider mb-3">Modules</h3>
+    <div className="glass glass-hover rounded-xl p-4 h-full hover:shadow-[0_0_10px_rgba(36,158,148,0.2)]">
+      <h3 className="text-sm font-semibold text-textSecondary uppercase tracking-wider mb-3">Modules</h3>
       <div className="space-y-2">
         {isLoading ? (
-          <div className="text-ow-mist/30 text-sm text-center py-4">Loading...</div>
+          <div className="text-textSecondary text-sm text-center py-4">Loading...</div>
         ) : (
           moduleConfig.map((mod) => {
             const enabled = modules?.[mod.name] ?? false;
@@ -70,22 +70,21 @@ function ModuleToggle({
     <button
       onClick={onToggle}
       disabled={loading}
-      className="w-full flex items-center justify-between p-3 rounded-xl bg-ow-teal/8 border border-[rgba(255,255,255,0.04)]
-                 hover:bg-ow-teal/15 hover:border-ow-accent/10 transition-all duration-200 group disabled:opacity-50"
+      className="w-full flex items-center justify-between p-3 rounded-xl bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.08)] hover:bg-[rgba(255,255,255,0.06)] transition-colors duration-200 group disabled:opacity-50"
     >
       <div className="flex items-center gap-3">
         {icon}
-        <span className="text-sm text-ow-light/80 group-hover:text-ow-light transition-colors">{label}</span>
+        <span className="text-sm text-textPrimary transition-colors">{label}</span>
       </div>
       <div
         className={`relative w-11 h-6 rounded-full transition-colors duration-300 ${
-          enabled ? "bg-ow-accent/25 border-ow-accent/35" : "bg-ow-teal/20 border-ow-teal/15"
+          enabled ? "bg-[rgba(36,158,148,0.2)] border-[rgba(36,158,148,0.45)]" : "bg-[rgba(255,255,255,0.05)] border-[rgba(255,255,255,0.12)]"
         } border`}
       >
         <div
           ref={knobRef}
           className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full transition-colors duration-300 ${
-            enabled ? "bg-ow-accent shadow-lg shadow-ow-accent/30" : "bg-ow-mist/40"
+            enabled ? "bg-accent" : "bg-textMuted"
           }`}
         />
       </div>

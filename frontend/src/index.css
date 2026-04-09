@@ -2,7 +2,60 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ── Base ── */
+@layer components {
+  .glass {
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .glass-strong {
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+  }
+
+  .glass-hover {
+    transition: all 0.25s ease;
+  }
+
+  .glass-hover:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(36, 158, 148, 0.4);
+  }
+
+  .panel-base {
+    @apply rounded-xl;
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .card-base {
+    @apply rounded-xl p-3;
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .app-shell-bg {
+    background: radial-gradient(
+      circle at top left,
+      rgba(36, 158, 148, 0.08),
+      transparent 40%
+    ),
+    #05070a;
+  }
+}
+
+.recharts-tooltip-wrapper {
+  outline: none !important;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -10,88 +63,7 @@
 }
 
 body {
-  font-family: "Inter", system-ui, -apple-system, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  background: #04161F;
-  color: #F3F4F4;
-}
-
-/* ── Glass panel utility ── */
-@layer components {
-  .glass-panel {
-    @apply rounded-2xl border shadow-glass;
-    background: rgba(29, 84, 109, 0.15);
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
-    border-color: rgba(255, 255, 255, 0.08);
-  }
-  .glass-panel-heavy {
-    @apply rounded-2xl border shadow-glass;
-    background: rgba(29, 84, 109, 0.25);
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
-    border-color: rgba(255, 255, 255, 0.08);
-  }
-}
-
-/* ── Custom scrollbar ── */
-.custom-scrollbar::-webkit-scrollbar {
-  width: 4px;
-}
-
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(43, 212, 168, 0.15);
-  border-radius: 999px;
-}
-
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgba(43, 212, 168, 0.3);
-}
-
-/* Global scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 999px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.12);
-}
-
-/* ── Recharts tooltip fix ── */
-.recharts-tooltip-wrapper {
-  outline: none !important;
-}
-
-/* ── Selection ── */
-::selection {
-  background: rgba(43, 212, 168, 0.25);
-  color: #fff;
-}
-
-/* ── Scanline effect for camera panels ── */
-.scanline::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: repeating-linear-gradient(
-    0deg,
-    transparent,
-    transparent 2px,
-    rgba(43, 212, 168, 0.015) 2px,
-    rgba(43, 212, 168, 0.015) 4px
-  );
-  z-index: 1;
+  @apply text-textPrimary;
+  background: #05070a;
+  font-family: system-ui, -apple-system, Segoe UI, sans-serif;
 }

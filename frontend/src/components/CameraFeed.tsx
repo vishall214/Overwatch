@@ -3,8 +3,32 @@ import { useQuery } from "@tanstack/react-query";
 import { getSourceInfo } from "../api/video";
 import { useCameraStream } from "../context/CameraStreamContext";
 
+type CameraModule = "intrusion" | "loitering" | "crowd" | "weapon_detection";
+
 interface CameraFeedProps {
-  moduleType?: "intrusion" | "loitering" | "crowd";
+  moduleType?: CameraModule;
+}
+
+const MODULE_LABELS: Record<CameraModule, string> = {
+  intrusion: "Intrusion",
+  loitering: "Loitering",
+  crowd: "Crowd",
+  weapon_detection: "Weapons",
+};
+
+function OverlayCard({ title, description }: { title: string; description: string }) {
+  return (
+    <div className="absolute inset-0 flex items-center justify-center bg-bg/50 backdrop-blur-sm">
+      <div className="glass px-6 py-4 rounded-xl text-center">
+        <p className="text-sm font-semibold uppercase tracking-[0.22em] text-textPrimary">{title}</p>
+        <p className="mt-2 text-xs text-textSecondary">{description}</p>
+      </div>
+    </div>
+  );
+}
+
+function OfflineOverlay() {
+  return <OverlayCard title="Camera Offline" description="Start the camera pipeline from the top bar." />;
 }
 
 /**
@@ -17,17 +41,16 @@ const CameraFeed = React.memo(function CameraFeed({ moduleType }: CameraFeedProp
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>(0);
   const { imageElement, cameraOnline } = useCameraStream();
-  const { data: sourceInfo } = useQuery({
+  const isCameraRunning = cameraOnline;
+  const { data: sourceInfo, isLoading: sourceLoading } = useQuery({
     queryKey: ["sourceInfo"],
     queryFn: getSourceInfo,
-    enabled: Boolean(moduleType) && cameraOnline,
+    enabled: Boolean(moduleType) && isCameraRunning,
     refetchInterval: 2000,
   });
 
-  const moduleMatches =
-    !moduleType ||
-    !sourceInfo?.active_module ||
-    sourceInfo.active_module === moduleType;
+  const activeModule = sourceInfo?.active_module;
+  const moduleMatches = Boolean(moduleType && activeModule && activeModule === moduleType);
 
   const paint = useCallback(() => {
     const canvas = canvasRef.current;
@@ -47,7 +70,7 @@ const CameraFeed = React.memo(function CameraFeed({ moduleType }: CameraFeedProp
   useEffect(() => {
     const canvas = canvasRef.current;
 
-    if (!cameraOnline || !imageElement || !moduleMatches) {
+    if (!isCameraRunning || !imageElement || !moduleMatches) {
       cancelAnimationFrame(rafRef.current);
 
       if (canvas) {
@@ -65,41 +88,51 @@ const CameraFeed = React.memo(function CameraFeed({ moduleType }: CameraFeedProp
     return () => {
       cancelAnimationFrame(rafRef.current);
     };
-  }, [cameraOnline, imageElement, moduleMatches, paint]);
+  }, [isCameraRunning, imageElement, moduleMatches, paint]);
+
+  if (!isCameraRunning) {
+    cancelAnimationFrame(rafRef.current);
+
+    return (
+      <div className="relative w-full h-full rounded-2xl glass-strong p-2">
+        <div className="relative w-full h-full rounded-xl overflow-hidden">
+          <OfflineOverlay />
+          <div className="absolute bottom-4 left-4 px-3 py-1 rounded-lg glass">
+            <span className="text-xs text-textMuted font-mono">OVERWATCH - Primary Feed</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="relative w-full h-full rounded-2xl overflow-hidden glass-panel-heavy scanline">
-      <canvas
-        ref={canvasRef}
-        className="w-full h-full object-contain bg-ow-bg"
-      />
+    <div className="relative w-full h-full rounded-2xl glass-strong p-2">
+      <div className="relative w-full h-full rounded-xl overflow-hidden">
+        <canvas
+          ref={canvasRef}
+          className="w-full h-full object-contain bg-bg"
+        />
 
-      {cameraOnline && moduleMatches ? (
-        <div className="absolute top-4 left-4 flex items-center gap-2 px-3 py-1.5 rounded-full bg-ow-alert-intrusion/15 backdrop-blur-md border border-ow-alert-intrusion/25">
-          <span className="w-2 h-2 rounded-full bg-ow-alert-intrusion animate-pulse" />
-          <span className="text-xs font-semibold text-ow-alert-intrusion/80 uppercase tracking-wider">Live</span>
-        </div>
-      ) : cameraOnline ? (
-        <div className="absolute inset-0 flex items-center justify-center bg-ow-bg/45 backdrop-blur-sm">
-          <div className="rounded-2xl border border-[rgba(255,255,255,0.08)] bg-ow-teal/10 px-5 py-4 text-center">
-            <p className="text-sm font-semibold uppercase tracking-[0.22em] text-ow-mist/80">Module Inactive</p>
-            <p className="mt-2 text-xs text-ow-mist/55">
-              Source is currently active in {sourceInfo?.active_module ?? "another"} module.
-            </p>
+        {!moduleType ? (
+          <OverlayCard title="Module Required" description="Select a module before rendering the camera stream." />
+        ) : sourceLoading || !activeModule ? (
+          <OverlayCard title="Syncing Module" description="Waiting for the active source module to be confirmed." />
+        ) : moduleMatches ? (
+          <div className="absolute top-4 left-4 flex items-center gap-2 px-3 py-1.5 rounded-full bg-threat-critical/10 backdrop-blur-md border border-threat-critical/40">
+            <span className="w-2 h-2 rounded-full bg-threat-critical animate-pulse" />
+            <span className="text-xs font-semibold text-threat-critical uppercase tracking-wider">Live</span>
           </div>
-        </div>
-      ) : (
-        <div className="absolute inset-0 flex items-center justify-center bg-ow-bg/45 backdrop-blur-sm">
-          <div className="rounded-2xl border border-[rgba(255,255,255,0.08)] bg-ow-teal/10 px-5 py-4 text-center">
-            <p className="text-sm font-semibold uppercase tracking-[0.22em] text-ow-mist/80">Camera Offline</p>
-            <p className="mt-2 text-xs text-ow-mist/55">Start the camera pipeline from the dashboard top bar.</p>
-          </div>
-        </div>
-      )}
+        ) : (
+          <OverlayCard
+            title="Module Inactive"
+            description={`Source is currently active in ${MODULE_LABELS[activeModule as CameraModule] ?? "another"}.`}
+          />
+        )}
 
-      {/* Overlay label */}
-      <div className="absolute bottom-4 left-4 px-3 py-1 rounded-lg bg-ow-bg/60 backdrop-blur-sm">
-        <span className="text-xs text-ow-mist/60 font-mono">OVERWATCH — Primary Feed</span>
+        {/* Overlay label */}
+        <div className="absolute bottom-4 left-4 px-3 py-1 rounded-lg glass">
+          <span className="text-xs text-textMuted font-mono">OVERWATCH - Primary Feed</span>
+        </div>
       </div>
     </div>
   );

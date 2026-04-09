@@ -1,50 +1,36 @@
-import { useState } from "react";
-import { NavLink, useLocation } from "react-router-dom";
+import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard,
-  ShieldAlert,
   Eye,
-  Users,
   Bell,
   BarChart3,
-  Home,
+  FileText,
   PanelLeftClose,
   PanelLeft,
-  Crosshair,
 } from "lucide-react";
 
 const links = [
-  { to: "/", label: "Landing", icon: Home },
-  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/intrusion", label: "Intrusion", icon: ShieldAlert },
-  { to: "/loitering", label: "Loitering", icon: Eye },
-  { to: "/crowd", label: "Crowd", icon: Users },
-  { to: "/weapons", label: "Weapons", icon: Crosshair },
+  { to: "/monitor", label: "Monitor", icon: LayoutDashboard },
   { to: "/alerts", label: "Alerts", icon: Bell },
   { to: "/analytics", label: "Analytics", icon: BarChart3 },
+  { to: "/reports", label: "Reports", icon: FileText },
 ];
 
 export default function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
-  const location = useLocation();
-
-  // Hide sidebar on landing page and login
-  if (location.pathname === "/" || location.pathname === "/login" || location.pathname === "/signup") return null;
-
   return (
     <aside
       className={`fixed left-0 top-0 h-screen z-40 flex flex-col transition-all duration-300 ease-in-out
-                  border-r border-[rgba(255,255,255,0.08)]
+                  glass shadow-[inset_0_0_20px_rgba(36,158,148,0.05)]
                   ${collapsed ? "w-[68px]" : "w-[220px]"}`}
-      style={{ background: "rgba(10,43,54,0.85)", backdropFilter: "blur(18px)", WebkitBackdropFilter: "blur(18px)" }}
     >
       {/* Brand */}
-      <div className={`flex items-center border-b border-[rgba(255,255,255,0.06)] ${collapsed ? "px-3 py-5 justify-center" : "px-5 py-5"}`}>
+      <div className={`flex items-center ${collapsed ? "px-3 py-5 justify-center" : "px-5 py-5"}`}>
         <NavLink to="/" className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-ow-accent to-ow-accent-dim flex items-center justify-center flex-shrink-0 shadow-glow">
-            <Eye className="w-4.5 h-4.5 text-ow-bg" />
+          <div className="w-9 h-9 rounded-lg bg-[rgba(255,255,255,0.06)] border border-[rgba(255,255,255,0.1)] flex items-center justify-center flex-shrink-0">
+            <Eye className="w-4.5 h-4.5 text-accent" />
           </div>
           {!collapsed && (
-            <span className="text-[15px] font-bold tracking-widest text-ow-accent">
+            <span className="text-base font-semibold text-textPrimary">
               OVERWATCH
             </span>
           )}
@@ -53,17 +39,17 @@ export default function Sidebar({ collapsed, onToggle }: { collapsed: boolean; o
 
       {/* Nav items */}
       <nav className="flex-1 px-2 py-4 space-y-1">
-        {links.slice(1).map((link) => (
+        {links.map((link) => (
           <NavLink
             key={link.to}
             to={link.to}
             title={collapsed ? link.label : undefined}
             className={({ isActive }) =>
-              `flex items-center gap-3 rounded-xl text-sm font-medium transition-all duration-200
+              `flex items-center gap-3 rounded-lg text-sm font-medium transition-all duration-200
                ${collapsed ? "px-3 py-2.5 justify-center" : "px-3 py-2.5"}
                ${isActive
-                ? "bg-ow-accent/10 text-ow-accent border border-ow-accent/15 shadow-glow"
-                : "text-ow-mist hover:text-ow-accent/80 hover:bg-ow-accent/5 border border-transparent"
+                ? "bg-[rgba(36,158,148,0.15)] text-textPrimary border border-[rgba(36,158,148,0.4)] shadow-[0_0_10px_rgba(36,158,148,0.2)]"
+                : "text-textSecondary hover:text-textPrimary hover:bg-[rgba(255,255,255,0.06)] border border-transparent"
               }`
             }
           >
@@ -74,10 +60,10 @@ export default function Sidebar({ collapsed, onToggle }: { collapsed: boolean; o
       </nav>
 
       {/* Collapse toggle */}
-      <div className="px-2 py-3 border-t border-[rgba(255,255,255,0.06)]">
+      <div className="px-2 py-3">
         <button
           onClick={onToggle}
-          className={`flex items-center gap-2 w-full rounded-xl py-2 text-ow-mist/60 hover:text-ow-accent/70 hover:bg-ow-accent/5
+          className={`flex items-center gap-2 w-full rounded-lg py-2 text-textSecondary hover:text-textPrimary hover:bg-[rgba(255,255,255,0.06)]
                      transition-all duration-200 ${collapsed ? "justify-center px-2" : "px-3"}`}
         >
           {collapsed ? <PanelLeft className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
@@ -87,8 +73,8 @@ export default function Sidebar({ collapsed, onToggle }: { collapsed: boolean; o
 
       {/* Footer */}
       {!collapsed && (
-        <div className="px-5 py-3 border-t border-[rgba(255,255,255,0.04)]">
-          <p className="text-[10px] text-ow-mist/30 font-mono tracking-wider">OVERWATCH v2.0</p>
+        <div className="px-5 py-3">
+          <p className="text-xs text-textMuted">OVERWATCH v2.0</p>
         </div>
       )}
     </aside>

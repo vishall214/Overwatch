@@ -3,32 +3,41 @@ import { useZones } from "../../hooks/useZones";
 import type { Zone } from "../../api/zones";
 import { useCameraStream } from "../../context/CameraStreamContext";
 
-/* ── Colour scheme per zone type ── */
-const ZONE_COLOURS: Record<string, { bg: string; border: string; label: string }> = {
+interface ZoneStyle {
+  fillClass: string;
+  borderClass: string;
+  labelClass: string;
+  handleClass: string;
+}
+
+const ZONE_STYLES: Record<string, ZoneStyle> = {
   intrusion: {
-    bg: "rgba(255,60,60,0.18)",
-    border: "rgba(255,60,60,0.7)",
-    label: "text-red-400",
+    fillClass: "bg-threat-critical/20",
+    borderClass: "border-threat-critical",
+    labelClass: "text-threat-critical",
+    handleClass: "bg-threat-critical",
   },
   loitering: {
-    bg: "rgba(255,165,0,0.18)",
-    border: "rgba(255,165,0,0.7)",
-    label: "text-orange-400",
+    fillClass: "bg-threat-high/20",
+    borderClass: "border-threat-high",
+    labelClass: "text-threat-high",
+    handleClass: "bg-threat-high",
   },
   crowd: {
-    bg: "rgba(255,255,0,0.18)",
-    border: "rgba(255,255,0,0.7)",
-    label: "text-yellow-400",
+    fillClass: "bg-threat-medium/20",
+    borderClass: "border-threat-medium",
+    labelClass: "text-threat-medium",
+    handleClass: "bg-threat-medium",
   },
 };
 
-const DEFAULT_COLOUR = {
-  bg: "rgba(43,212,168,0.18)",
-  border: "rgba(43,212,168,0.7)",
-  label: "text-emerald-400",
+const DEFAULT_STYLE: ZoneStyle = {
+  fillClass: "bg-accent/20",
+  borderClass: "border-accent",
+  labelClass: "text-accent",
+  handleClass: "bg-accent",
 };
 
-/* ── Types ── */
 interface Rect {
   x: number;
   y: number;
@@ -73,7 +82,7 @@ const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
 const computeViewport = (
   container: HTMLDivElement,
   videoWidth: number,
-  videoHeight: number,
+  videoHeight: number
 ): VideoViewport => {
   const rect = container.getBoundingClientRect();
   const containerWidth = Math.max(1, rect.width);
@@ -117,22 +126,17 @@ const computeViewport = (
   };
 };
 
-/* ═══════════════════════════════════════════════════════════════ */
-/*  ZoneEditor                                                    */
-/* ═══════════════════════════════════════════════════════════════ */
 const ZoneEditor: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const { imageElement } = useCameraStream();
   const { zones, addZone, removeZone } = useZones();
 
-  /* Drawing state — refs to avoid re-renders during drag */
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawMode, setDrawMode] = useState(false);
   const [zoneType, setZoneType] = useState("intrusion");
   const drawRef = useRef<Rect | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);
 
-  /* Drag / resize state (also ref-based) */
   const dragRef = useRef<DragState | null>(null);
   const [, forceUpdate] = useState(0);
 
@@ -148,6 +152,7 @@ const ZoneEditor: React.FC = () => {
     canvasWidth: 0,
     canvasHeight: 0,
   };
+
   const [viewport, setViewport] = useState<VideoViewport>(initialViewport);
   const viewportRef = useRef<VideoViewport>(initialViewport);
 
@@ -156,7 +161,7 @@ const ZoneEditor: React.FC = () => {
     const next = computeViewport(
       containerRef.current,
       imageElement?.naturalWidth ?? 0,
-      imageElement?.naturalHeight ?? 0,
+      imageElement?.naturalHeight ?? 0
     );
     viewportRef.current = next;
     setViewport(next);
@@ -203,7 +208,6 @@ const ZoneEditor: React.FC = () => {
     };
   }, []);
 
-  /* ── Drawing handlers ── */
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
       if (!drawMode || !containerRef.current) return;
@@ -216,7 +220,7 @@ const ZoneEditor: React.FC = () => {
       drawRef.current = { x, y, w: 0, h: 0 };
       setIsDrawing(true);
     },
-    [drawMode, pointerToNormalized],
+    [drawMode, pointerToNormalized]
   );
 
   const handleMouseMove = useCallback(
@@ -224,30 +228,28 @@ const ZoneEditor: React.FC = () => {
       const point = pointerToNormalized(e);
       if (!point) return;
 
-      /* ---------- Drawing ---------- */
       if (isDrawing && drawRef.current) {
         const cx = point.normalizedX;
         const cy = point.normalizedY;
         drawRef.current.w = cx - drawRef.current.x;
         drawRef.current.h = cy - drawRef.current.y;
-        /* Update preview div directly — no React state during drag */
+
         if (previewRef.current) {
           const d = drawRef.current;
           const left = Math.min(d.x, d.x + d.w) * 100;
           const top = Math.min(d.y, d.y + d.h) * 100;
           const width = Math.abs(d.w) * 100;
           const height = Math.abs(d.h) * 100;
-          const s = previewRef.current.style;
-          s.left = `${left}%`;
-          s.top = `${top}%`;
-          s.width = `${width}%`;
-          s.height = `${height}%`;
-          s.display = "block";
+          const style = previewRef.current.style;
+          style.left = `${left}%`;
+          style.top = `${top}%`;
+          style.width = `${width}%`;
+          style.height = `${height}%`;
+          style.display = "block";
         }
         return;
       }
 
-      /* ---------- Drag / resize ---------- */
       if (dragRef.current) {
         const ds = dragRef.current;
         const dx = point.normalizedX - ds.startX;
@@ -256,10 +258,10 @@ const ZoneEditor: React.FC = () => {
         const zone = zones.find((z) => z.id === ds.zoneId);
         if (!zone) return;
 
-        let nx = zone.x,
-          ny = zone.y,
-          nw = zone.width,
-          nh = zone.height;
+        let nx = zone.x;
+        let ny = zone.y;
+        let nw = zone.width;
+        let nh = zone.height;
 
         if (ds.type === "move") {
           nx = Math.max(0, Math.min(1 - ds.origW, ds.origX + dx));
@@ -267,34 +269,33 @@ const ZoneEditor: React.FC = () => {
           nw = ds.origW;
           nh = ds.origH;
         } else {
-          // Corner resize
-          let x1 = ds.origX,
-            y1 = ds.origY,
-            x2 = ds.origX + ds.origW,
-            y2 = ds.origY + ds.origH;
+          let x1 = ds.origX;
+          let y1 = ds.origY;
+          let x2 = ds.origX + ds.origW;
+          let y2 = ds.origY + ds.origH;
+
           if (ds.type.includes("w")) x1 = Math.max(0, ds.origX + dx);
           if (ds.type.includes("e")) x2 = Math.min(1, ds.origX + ds.origW + dx);
           if (ds.type.includes("n")) y1 = Math.max(0, ds.origY + dy);
           if (ds.type.includes("s")) y2 = Math.min(1, ds.origY + ds.origH + dy);
+
           nx = Math.min(x1, x2);
           ny = Math.min(y1, y2);
           nw = Math.abs(x2 - x1);
           nh = Math.abs(y2 - y1);
         }
 
-        // Mutate directly (live preview), persist on mouseup
-        (zone as any).x = nx;
-        (zone as any).y = ny;
-        (zone as any).width = nw;
-        (zone as any).height = nh;
+        (zone as Zone & { x: number; y: number; width: number; height: number }).x = nx;
+        (zone as Zone & { x: number; y: number; width: number; height: number }).y = ny;
+        (zone as Zone & { x: number; y: number; width: number; height: number }).width = nw;
+        (zone as Zone & { x: number; y: number; width: number; height: number }).height = nh;
         forceUpdate((n) => n + 1);
       }
     },
-    [isDrawing, pointerToNormalized, zones],
+    [isDrawing, pointerToNormalized, zones]
   );
 
   const handleMouseUp = useCallback(() => {
-    /* ---------- Finish drawing ---------- */
     if (isDrawing && drawRef.current) {
       const d = drawRef.current;
       const x = Math.min(d.x, d.x + d.w);
@@ -302,7 +303,6 @@ const ZoneEditor: React.FC = () => {
       const w = Math.abs(d.w);
       const h = Math.abs(d.h);
 
-      // Only save zones with meaningful size
       if (w > 0.01 && h > 0.01) {
         const payload = { type: zoneType, x, y, width: w, height: h };
         addZone(payload);
@@ -314,11 +314,9 @@ const ZoneEditor: React.FC = () => {
       return;
     }
 
-    /* ---------- Finish drag / resize ---------- */
     if (dragRef.current) {
       const zone = zones.find((z) => z.id === dragRef.current!.zoneId);
       if (zone) {
-        // Re-save with updated coords (delete + create)
         const { type, x, y, width, height, name } = zone;
         removeZone(zone.id);
         addZone({ type, x, y, width, height, name: name ?? undefined });
@@ -327,14 +325,12 @@ const ZoneEditor: React.FC = () => {
     }
   }, [isDrawing, zoneType, addZone, removeZone, zones]);
 
-  /* Cleanup on unmount */
   useEffect(() => {
     const up = () => handleMouseUp();
     window.addEventListener("mouseup", up);
     return () => window.removeEventListener("mouseup", up);
   }, [handleMouseUp]);
 
-  /* ── Start drag / resize ── */
   const startDrag = useCallback(
     (e: React.MouseEvent, zone: Zone, type: DragState["type"]) => {
       e.stopPropagation();
@@ -353,16 +349,15 @@ const ZoneEditor: React.FC = () => {
         origH: zone.height,
       };
     },
-    [pointerToNormalized],
+    [pointerToNormalized]
   );
 
   const handleClearAll = useCallback(() => {
     zones.forEach((z) => removeZone(z.id));
   }, [zones, removeZone]);
 
-  /* ── Colour helper ── */
-  const c = (type: string) => ZONE_COLOURS[type] ?? DEFAULT_COLOUR;
-
+  const getZoneStyle = (type: string): ZoneStyle => ZONE_STYLES[type] ?? DEFAULT_STYLE;
+  const previewStyle = getZoneStyle(zoneType);
   const cursorClass = drawMode ? "cursor-crosshair" : "cursor-default";
 
   return (
@@ -384,58 +379,57 @@ const ZoneEditor: React.FC = () => {
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
       >
-        {/* ── Rendered zones ── */}
         {zones.map((zone) => {
-          const col = c(zone.type);
+          const style = getZoneStyle(zone.type);
+
           return (
             <div
               key={zone.id}
-              className="absolute group"
+              className={`absolute group border-2 ${style.fillClass} ${style.borderClass}`}
               style={{
                 left: `${zone.x * 100}%`,
                 top: `${zone.y * 100}%`,
                 width: `${zone.width * 100}%`,
                 height: `${zone.height * 100}%`,
-                background: col.bg,
-                border: `2px solid ${col.border}`,
-                boxShadow: `0 0 12px ${col.border}`,
                 pointerEvents: "auto",
               }}
               onMouseDown={(e) => !drawMode && startDrag(e, zone, "move")}
             >
-              {/* Label */}
               <span
-                className={`absolute top-0.5 left-1 text-[10px] font-mono uppercase tracking-wider select-none ${col.label}`}
+                className={`absolute top-0.5 left-1 text-[10px] font-mono uppercase tracking-wider select-none ${style.labelClass}`}
               >
                 {zone.name ?? zone.type}
               </span>
 
-              {/* Delete button */}
               <button
-                className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-red-600/80 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer pointer-events-auto z-20"
+                className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-threat-critical text-bg text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer pointer-events-auto z-20"
                 onClick={(e) => {
                   e.stopPropagation();
                   removeZone(zone.id);
                 }}
               >
-                ×
+                x
               </button>
 
-              {/* 4 corner resize handles */}
               {(["nw", "ne", "sw", "se"] as const).map((corner) => {
                 const pos: React.CSSProperties = {};
                 if (corner.includes("n")) pos.top = -4;
                 if (corner.includes("s")) pos.bottom = -4;
                 if (corner.includes("w")) pos.left = -4;
                 if (corner.includes("e")) pos.right = -4;
-                const cursorMap = { nw: "nwse-resize", ne: "nesw-resize", sw: "nesw-resize", se: "nwse-resize" };
+                const cursorMap = {
+                  nw: "nwse-resize",
+                  ne: "nesw-resize",
+                  sw: "nesw-resize",
+                  se: "nwse-resize",
+                };
+
                 return (
                   <div
                     key={corner}
-                    className="absolute w-2.5 h-2.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity pointer-events-auto z-20"
+                    className={`absolute w-2.5 h-2.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity pointer-events-auto z-20 ${style.handleClass}`}
                     style={{
                       ...pos,
-                      background: col.border,
                       cursor: cursorMap[corner],
                     }}
                     onMouseDown={(e) => !drawMode && startDrag(e, zone, corner)}
@@ -446,48 +440,41 @@ const ZoneEditor: React.FC = () => {
           );
         })}
 
-        {/* ── Preview rect while drawing ── */}
         <div
           ref={previewRef}
-          className="absolute border-2 border-dashed pointer-events-none"
-          style={{
-            display: "none",
-            borderColor: c(zoneType).border,
-            background: c(zoneType).bg,
-          }}
+          className={`absolute border-2 border-dashed pointer-events-none hidden ${previewStyle.fillClass} ${previewStyle.borderClass}`}
         />
       </div>
 
-      {/* ── Controls ── */}
       <div
-        className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 rounded-xl bg-ow-bg/80 backdrop-blur-lg border border-white/10 shadow-lg z-30"
+        className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 rounded-xl bg-bg/80 backdrop-blur-lg border border-border shadow-lg z-30"
         style={{ pointerEvents: "auto" }}
       >
         <button
           onClick={() => setDrawMode((d) => !d)}
-          className={`px-3 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wider transition-all ${
+          className={`px-3 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wider transition-colors ${
             drawMode
-              ? "bg-ow-teal text-ow-bg shadow-[0_0_12px_rgba(43,212,168,0.4)]"
-              : "bg-white/5 text-ow-mist/70 hover:bg-white/10"
+              ? "bg-accent text-bg"
+              : "bg-surface text-textSecondary hover:bg-card"
           }`}
         >
-          {drawMode ? "Drawing…" : "Draw Zone"}
+          {drawMode ? "Drawing..." : "Draw Zone"}
         </button>
 
         <select
           value={zoneType}
           onChange={(e) => setZoneType(e.target.value)}
-          className="px-2 py-1.5 rounded-lg text-xs bg-white/5 text-ow-mist/80 border border-white/10 outline-none cursor-pointer appearance-none"
+          className="px-2 py-1.5 rounded-lg text-xs bg-surface text-textPrimary border border-border outline-none cursor-pointer appearance-none"
         >
-          <option value="intrusion">🔴 Intrusion</option>
-          <option value="loitering">🟠 Loitering</option>
-          <option value="crowd">🟡 Crowd</option>
+          <option value="intrusion">Intrusion</option>
+          <option value="loitering">Loitering</option>
+          <option value="crowd">Crowd</option>
         </select>
 
         {zones.length > 0 && (
           <button
             onClick={handleClearAll}
-            className="px-3 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wider bg-red-600/20 text-red-400 hover:bg-red-600/30 transition-all"
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wider bg-threat-critical/20 text-threat-critical hover:bg-threat-critical/30 transition-colors"
           >
             Clear All
           </button>

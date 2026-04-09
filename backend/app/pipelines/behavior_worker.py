@@ -19,7 +19,7 @@ import queue
 import threading
 import time
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 import cv2
 import numpy as np
@@ -285,6 +285,106 @@ class BehaviorWorker:
         for k in stale_keys:
             del self._event_states[k]
 
+    def _compute_threat(self, signals: dict[str, bool]) -> int:
+        """Compute threat score from frame-level signals and configured bonuses."""
+        if not self._settings.enable_threat_scoring:
+            return 0
+
+        score = 0
+
+        if signals.get("weapon_detected", False):
+            score += int(self._settings.threat_weight_weapon_detected)
+        if signals.get("weapon_in_zone", False):
+            score += int(self._settings.threat_weight_weapon_in_zone)
+        if signals.get("intrusion", False):
+            score += int(self._settings.threat_weight_intrusion)
+        if signals.get("loitering", False):
+            score += int(self._settings.threat_weight_loitering)
+        if signals.get("crowd", False):
+            score += int(self._settings.threat_weight_crowd)
+
+        # Context bonuses
+        if signals.get("weapon_in_zone", False):
+            score += int(self._settings.threat_bonus_weapon_zone)
+        if signals.get("crowd", False) and (
+            signals.get("weapon_detected", False)
+            or signals.get("weapon_in_zone", False)
+        ):
+            score += int(self._settings.threat_bonus_weapon_crowd)
+        if signals.get("intrusion", False) and (
+            signals.get("weapon_detected", False)
+            or signals.get("weapon_in_zone", False)
+        ):
+            score += int(self._settings.threat_bonus_intrusion_weapon)
+
+        return max(0, int(score))
+
+    def _get_threat_level(self, score: int) -> str:
+        """Map threat score to a normalized threat level string."""
+        if score >= int(self._settings.threat_level_critical_threshold):
+            return "CRITICAL"
+        if score >= int(self._settings.threat_level_high_threshold):
+            return "HIGH"
+        if score >= int(self._settings.threat_level_medium_threshold):
+            return "MEDIUM"
+        return "LOW"
+
+    @staticmethod
+    def _attach_threat_context(
+        event_data: dict[str, Any],
+        threat_score: int,
+        threat_level: str,
+        signals: Optional[dict[str, bool]] = None,
+    ) -> None:
+        """Attach threat score/level metadata to an event payload in-place."""
+        event_data["threat_score"] = int(threat_score)
+        event_data["threat_level"] = str(threat_level)
+        if signals is not None:
+            event_data["threat_signals"] = {
+                "weapon_detected": bool(signals.get("weapon_detected", False)),
+                "weapon_in_zone": bool(signals.get("weapon_in_zone", False)),
+                "intrusion": bool(signals.get("intrusion", False)),
+                "loitering": bool(signals.get("loitering", False)),
+                "crowd": bool(signals.get("crowd", False)),
+            }
+
+    def _flush_pending_alerts(
+        self,
+        pending_alerts: list[dict[str, Any]],
+        frame: np.ndarray,
+        threat_score: int,
+        threat_level: str,
+        signals: dict[str, bool],
+    ) -> None:
+        """Persist queued alerts after threat context is computed for the frame."""
+        if self._alert_service is None:
+            return
+
+        for pending in pending_alerts:
+            metadata = pending.get("metadata")
+            if isinstance(metadata, dict):
+                self._attach_threat_context(metadata, threat_score, threat_level, signals)
+            else:
+                metadata = {
+                    "threat_score": int(threat_score),
+                    "threat_level": str(threat_level),
+                    "threat_signals": {
+                        "weapon_detected": bool(signals.get("weapon_detected", False)),
+                        "weapon_in_zone": bool(signals.get("weapon_in_zone", False)),
+                        "intrusion": bool(signals.get("intrusion", False)),
+                        "loitering": bool(signals.get("loitering", False)),
+                        "crowd": bool(signals.get("crowd", False)),
+                    },
+                }
+
+            self._alert_service.create_alert(
+                event_type=str(pending.get("event_type", "unknown")),
+                track_id=pending.get("track_id"),
+                zone=str(pending.get("zone", "")),
+                metadata=metadata,
+                frame=frame,
+            )
+
     def _face_worker_loop(self) -> None:
         """Background thread: dequeue person crops, run InsightFace, update caches."""
         logger.info("FaceWorker thread started")
@@ -316,6 +416,7 @@ class BehaviorWorker:
                             "confidence": top_face["confidence"],
                             "timestamp": datetime.now(timezone.utc).isoformat(),
                         }
+                        self._attach_threat_context(match_event, threat_score=0, threat_level="LOW")
                         self._publish_event(Event(
                             type="FaceMatchDetected",
                             data=match_event,
@@ -367,6 +468,7 @@ class BehaviorWorker:
                 input_age_ms = (time.monotonic_ns() - packet.timestamp_ns) / 1_000_000
 
                 behavior_events: list[dict] = []
+                pending_alerts: list[dict[str, Any]] = []
                 intrusion_detected = False
                 loitering_detected = False
                 crowd_detected = False
@@ -380,7 +482,12 @@ class BehaviorWorker:
                 _mod = (
                     self._module_controller.modules
                     if self._module_controller is not None
-                    else {"intrusion": True, "loitering": True, "crowd": True}
+                    else {
+                        "intrusion": True,
+                        "loitering": True,
+                        "crowd": True,
+                        "weapon_detection": True,
+                    }
                 )
 
                 # --- Resolve zones (cached — no DB call) ---------------
@@ -470,11 +577,12 @@ class BehaviorWorker:
                                     }
                                     behavior_events.append(event_data)
                                     self._publish_event(Event(type="IntrusionDetected", data=event_data))
-                                    if self._alert_service is not None:
-                                        self._alert_service.create_alert(
-                                            event_type="intrusion", track_id=track_id,
-                                            zone="A", metadata=event_data, frame=packet.frame,
-                                        )
+                                    pending_alerts.append({
+                                        "event_type": "intrusion",
+                                        "track_id": track_id,
+                                        "zone": "A",
+                                        "metadata": event_data,
+                                    })
                                     logger.warning("INTRUSION: %s #%d entered Zone A", obj.get("class_name", "unknown"), track_id)
                             else:
                                 self._active_intrusions.discard(track_id)
@@ -499,11 +607,12 @@ class BehaviorWorker:
                                         }
                                         behavior_events.append(loiter_event)
                                         self._publish_event(Event(type="LoiteringDetected", data=loiter_event))
-                                        if self._alert_service is not None:
-                                            self._alert_service.create_alert(
-                                                event_type="loitering", track_id=track_id,
-                                                zone="A", metadata=loiter_event, frame=packet.frame,
-                                            )
+                                        pending_alerts.append({
+                                            "event_type": "loitering",
+                                            "track_id": track_id,
+                                            "zone": "A",
+                                            "metadata": loiter_event,
+                                        })
                                         logger.warning("LOITERING: %s #%d in Zone A for %.1fs", obj.get("class_name", "unknown"), track_id, duration)
                             else:
                                 self._loiter_state.pop(track_id, None)
@@ -572,11 +681,12 @@ class BehaviorWorker:
                                     }
                                     behavior_events.append(event_data)
                                     self._publish_event(Event(type="IntrusionDetected", data=event_data))
-                                    if self._alert_service is not None:
-                                        self._alert_service.create_alert(
-                                            event_type="intrusion", track_id=track_id,
-                                            zone=zone_name, metadata=event_data, frame=packet.frame,
-                                        )
+                                    pending_alerts.append({
+                                        "event_type": "intrusion",
+                                        "track_id": track_id,
+                                        "zone": zone_name,
+                                        "metadata": event_data,
+                                    })
                                     logger.warning("INTRUSION: %s #%d entered %s", obj.get("class_name", "unknown"), track_id, zone_name)
 
                             # -- Loitering (user zone) --
@@ -599,11 +709,12 @@ class BehaviorWorker:
                                         }
                                         behavior_events.append(loiter_event)
                                         self._publish_event(Event(type="LoiteringDetected", data=loiter_event))
-                                        if self._alert_service is not None:
-                                            self._alert_service.create_alert(
-                                                event_type="loitering", track_id=track_id,
-                                                zone=zone_name, metadata=loiter_event, frame=packet.frame,
-                                            )
+                                        pending_alerts.append({
+                                            "event_type": "loitering",
+                                            "track_id": track_id,
+                                            "zone": zone_name,
+                                            "metadata": loiter_event,
+                                        })
                                         logger.warning("LOITERING: %s #%d in %s for %.1fs", obj.get("class_name", "unknown"), track_id, zone_name, duration)
 
                     if not in_any_zone:
@@ -627,11 +738,12 @@ class BehaviorWorker:
                             }
                             behavior_events.append(crowd_event)
                             self._publish_event(Event(type="CrowdDetected", data=crowd_event))
-                            if self._alert_service is not None:
-                                self._alert_service.create_alert(
-                                    event_type="crowd", track_id=None,
-                                    zone="A", metadata=crowd_event, frame=packet.frame,
-                                )
+                            pending_alerts.append({
+                                "event_type": "crowd",
+                                "track_id": None,
+                                "zone": "A",
+                                "metadata": crowd_event,
+                            })
                             logger.warning("CROWD: %d persons in Zone A (threshold %d)", people_in_zone, self._crowd_threshold)
                     else:
                         self._crowd_alerted = False
@@ -655,11 +767,12 @@ class BehaviorWorker:
                                 }
                                 behavior_events.append(crowd_event)
                                 self._publish_event(Event(type="CrowdDetected", data=crowd_event))
-                                if self._alert_service is not None:
-                                    self._alert_service.create_alert(
-                                        event_type="crowd", track_id=None,
-                                        zone=zone_name, metadata=crowd_event, frame=packet.frame,
-                                    )
+                                pending_alerts.append({
+                                    "event_type": "crowd",
+                                    "track_id": None,
+                                    "zone": zone_name,
+                                    "metadata": crowd_event,
+                                })
                                 logger.warning("CROWD: %d persons in %s (threshold %d)", z_count, zone_name, self._crowd_threshold)
                         else:
                             self._crowd_alerted_zones.discard(zid)
@@ -727,9 +840,34 @@ class BehaviorWorker:
 
                 # --- Weapon / Dangerous Object Handling ---------------
                 weapon_detected = False
+                weapon_signal_detected = any(
+                    alert.get("event_type") in {"weapon_detected", "weapon_in_zone"}
+                    for alert in self._active_weapon_alerts
+                )
+                weapon_in_zone_detected = any(
+                    alert.get("event_type") == "weapon_in_zone"
+                    for alert in self._active_weapon_alerts
+                )
+
                 if _mod.get("weapon_detection", True):
-                    weapon_dets = getattr(packet, 'weapon_detections', None)
+                    weapon_dets = getattr(packet, "weapon_detections", None)
                     if weapon_dets is not None:
+                        if weapon_dets:
+                            weapon_signal_detected = True
+                            for det in weapon_dets:
+                                bbox = det.get("bbox", [0, 0, 0, 0])
+                                bbox_norm = self._normalize_bbox(bbox, frame_w, frame_h)
+                                bbox_px = self._to_pixel_bbox(bbox_norm, frame_w, frame_h)
+                                in_zone, _, _ = self._resolve_weapon_zone(
+                                    bbox_px=bbox_px,
+                                    user_zones=user_zones,
+                                    frame_w=frame_w,
+                                    frame_h=frame_h,
+                                    use_legacy=use_legacy,
+                                )
+                                if in_zone:
+                                    weapon_in_zone_detected = True
+
                         weapon_detected = self._handle_weapon_detections(
                             weapon_dets,
                             now,
@@ -739,12 +877,37 @@ class BehaviorWorker:
                             frame_w=frame_w,
                             frame_h=frame_h,
                             use_legacy=use_legacy,
+                            pending_alerts=pending_alerts,
                         )
+                        if weapon_detected or self._active_weapon_alerts:
+                            weapon_signal_detected = True
+                        if any(
+                            alert.get("event_type") == "weapon_in_zone"
+                            for alert in self._active_weapon_alerts
+                        ):
+                            weapon_in_zone_detected = True
 
-                weapon_in_zone_detected = any(
-                    alert.get("event_type") == "weapon_in_zone"
-                    for alert in self._active_weapon_alerts
-                )
+                threat_signals = {
+                    "weapon_detected": weapon_signal_detected,
+                    "weapon_in_zone": weapon_in_zone_detected,
+                    "intrusion": intrusion_detected,
+                    "loitering": loitering_detected,
+                    "crowd": crowd_detected,
+                }
+                threat_score = self._compute_threat(threat_signals)
+                threat_level = self._get_threat_level(threat_score)
+
+                for event_data in behavior_events:
+                    self._attach_threat_context(event_data, threat_score, threat_level, threat_signals)
+
+                if pending_alerts:
+                    self._flush_pending_alerts(
+                        pending_alerts=pending_alerts,
+                        frame=packet.frame,
+                        threat_score=threat_score,
+                        threat_level=threat_level,
+                        signals=threat_signals,
+                    )
 
                 # --- Draw zone overlay and alerts ---------------------
                 annotated = self._draw_zone_overlay(
@@ -812,12 +975,14 @@ class BehaviorWorker:
 
                 if self._analyze_count % 30 == 0:
                     logger.info(
-                        "perf behavior frame=%d input_age_ms=%.1f behavior_time_ms=%.1f behavior_queue=%d face_queue=%d",
+                        "perf behavior frame=%d input_age_ms=%.1f behavior_time_ms=%.1f behavior_queue=%d face_queue=%d threat_score=%d threat_level=%s",
                         packet.frame_index,
                         input_age_ms,
                         behavior_time_ms,
                         self._queues.behavior_queue.qsize(),
                         self._face_queue.qsize(),
+                        threat_score,
+                        threat_level,
                     )
 
             except Exception:
@@ -1079,6 +1244,7 @@ class BehaviorWorker:
         frame_w: Optional[int] = None,
         frame_h: Optional[int] = None,
         use_legacy: Optional[bool] = None,
+        pending_alerts: Optional[list[dict[str, Any]]] = None,
     ) -> bool:
         """
         Process weapon detections with temporal filtering and cooldown.
@@ -1097,6 +1263,7 @@ class BehaviorWorker:
             now: Current monotonic time.
             frame: Current video frame for snapshot capture.
             behavior_events: Mutable list to append behavior event dicts to.
+            pending_alerts: Optional mutable list for deferred alert persistence.
 
         Returns:
             bool: True if any weapon alert was triggered this frame.
@@ -1174,6 +1341,21 @@ class BehaviorWorker:
                         "zone_name": zone_name if in_zone else "",
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
+                    baseline_signals = {
+                        "weapon_detected": True,
+                        "weapon_in_zone": bool(in_zone),
+                        "intrusion": False,
+                        "loitering": False,
+                        "crowd": False,
+                    }
+                    baseline_score = self._compute_threat(baseline_signals)
+                    baseline_level = self._get_threat_level(baseline_score)
+                    self._attach_threat_context(
+                        weapon_event,
+                        baseline_score,
+                        baseline_level,
+                        baseline_signals,
+                    )
                     behavior_events.append(weapon_event)
 
                     self._publish_event(Event(
@@ -1185,7 +1367,14 @@ class BehaviorWorker:
                         data=weapon_event,
                     ))
 
-                    if self._alert_service is not None:
+                    if pending_alerts is not None:
+                        pending_alerts.append({
+                            "event_type": event_type,
+                            "track_id": None,
+                            "zone": zone_name if in_zone else "",
+                            "metadata": weapon_event,
+                        })
+                    elif self._alert_service is not None:
                         self._alert_service.create_alert(
                             event_type=event_type,
                             track_id=None,

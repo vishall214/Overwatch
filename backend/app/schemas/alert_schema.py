@@ -19,6 +19,10 @@ class AlertResponse(BaseModel):
     zone: str = ""
     metadata: dict[str, Any] = {}
     snapshot_path: str = ""
+    snapshot_filename: str = ""
+    snapshot_url: str = ""
+    threat_score: int = 0
+    threat_level: str = "LOW"
 
 
 class AlertListResponse(BaseModel):

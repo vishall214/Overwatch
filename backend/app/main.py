@@ -26,10 +26,13 @@ from app.api.routes_alerts import router as alerts_router
 from app.api.routes_analytics import router as analytics_router
 from app.api.routes_auth import router as auth_router
 from app.api.routes_faces import router as faces_router
+from app.api.routes_reports import router as reports_router, init_report_routes
 from app.api.routes_system import router as system_router
 from app.api.routes_monitoring import router as monitoring_router
 from app.api.routes_zones import router as zones_router
 from app.api.routes_video import router as video_router, init_video_routes
+from app.services.report_scheduler import ReportScheduler
+from app.services.report_service import ReportService
 from app.services.source_manager import SourceManager
 from app.database.database import engine
 from app.database.models import Base
@@ -72,6 +75,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     init_video_routes(pipeline, source_manager)
     logger.info("Video routes initialized")
 
+    report_service = ReportService(settings)
+    report_scheduler = ReportScheduler(settings, report_service)
+    init_report_routes(report_service, report_scheduler)
+
+    if settings.report_scheduler_enabled:
+        report_scheduler.start()
+        logger.info("Report scheduler started")
+    else:
+        logger.info("Report scheduler disabled")
+
     yield
 
     # ── Shutdown ─────────────────────────────────────────────────
@@ -80,6 +93,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Stop pipeline if running
     if pipeline.is_running:
         await pipeline.stop()
+
+    report_scheduler.stop()
 
     logger.info("OVERWATCH shutdown complete")
 
@@ -118,6 +133,7 @@ def create_app() -> FastAPI:
     application.include_router(auth_router)
     application.include_router(alerts_router)
     application.include_router(analytics_router)
+    application.include_router(reports_router)
     application.include_router(faces_router)
     application.include_router(system_router)
     application.include_router(monitoring_router)

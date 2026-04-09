@@ -3,32 +3,49 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { switchSource, listDemoVideos, uploadVideo, deleteUploadedVideo } from "../api/video";
 import { AlertCircle, Check, Loader, Trash2, Upload, Video } from "lucide-react";
 
+type SourceModule = "intrusion" | "loitering" | "crowd" | "weapon_detection";
+type ApiModule = "intrusion" | "loitering" | "crowd";
+
 interface SourceSelectorProps {
-  moduleType: "intrusion" | "loitering" | "crowd";
+  moduleType: SourceModule;
   onSourceChanged?: () => void;
+}
+
+function resolveApiModule(moduleType: SourceModule): ApiModule {
+  if (moduleType === "weapon_detection") return "intrusion";
+  return moduleType;
+}
+
+function resolveDemoCategory(moduleType: SourceModule): "intrusion" | "loitering" | "crowd" {
+  if (moduleType === "weapon_detection") return "intrusion";
+  return moduleType;
+}
+
+function formatDemoName(filename: string): string {
+  return filename.replace(/\.[^/.]+$/, "").replace(/[_-]+/g, " ").trim();
 }
 
 export default function SourceSelector({ moduleType, onSourceChanged }: SourceSelectorProps) {
   const [selectedMode, setSelectedMode] = useState<"demo" | "upload" | "live" | null>(null);
   const [selectedDemo, setSelectedDemo] = useState<string>("");
+  const [loadedDemo, setLoadedDemo] = useState<string>("");
   const [uploadedFilename, setUploadedFilename] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [uploadProgress,  setUploadProgress] = useState(0);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const apiModule = resolveApiModule(moduleType);
+  const demoCategory = resolveDemoCategory(moduleType);
 
-  // Fetch demo videos for this module
   const { data: demoList, isLoading: demoLoading } = useQuery({
-    queryKey: ["demoVideos", moduleType],
-    queryFn: () => listDemoVideos(moduleType),
+    queryKey: ["demoVideos", demoCategory],
+    queryFn: () => listDemoVideos(demoCategory),
     enabled: selectedMode === "demo",
   });
 
-  // Switch source mutation
   const switchMutation = useMutation({
     mutationFn: switchSource,
     onSuccess: () => {
       onSourceChanged?.();
-      setSelectedDemo("");
       setUploadProgress(0);
     },
   });
@@ -40,6 +57,7 @@ export default function SourceSelector({ moduleType, onSourceChanged }: SourceSe
       setUploadError(null);
       setSelectedMode(null);
       setSelectedDemo("");
+      setLoadedDemo("");
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
@@ -48,22 +66,21 @@ export default function SourceSelector({ moduleType, onSourceChanged }: SourceSe
     },
   });
 
-  // Handle demo selection
   const handleDemoSelect = async (videoName: string) => {
     setSelectedDemo(videoName);
     try {
       await switchMutation.mutateAsync({
         type: "demo",
-        module: moduleType,
+        module: apiModule,
         name: videoName,
-        category: moduleType,
+        category: demoCategory,
       });
+      setLoadedDemo(videoName);
     } catch (error) {
       console.error("Failed to switch to demo:", error);
     }
   };
 
-  // Handle file upload and source switch
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -81,7 +98,7 @@ export default function SourceSelector({ moduleType, onSourceChanged }: SourceSe
 
       await switchMutation.mutateAsync({
         type: "upload",
-        module: moduleType,
+        module: apiModule,
         path: uploadResponse.path,
       });
       setUploadProgress(100);
@@ -105,89 +122,98 @@ export default function SourceSelector({ moduleType, onSourceChanged }: SourceSe
     }
   };
 
-  // Handle live camera
   const handleLiveCamera = async () => {
     try {
       await switchMutation.mutateAsync({
         type: "camera",
-        module: moduleType,
+        module: apiModule,
       });
+      setLoadedDemo("");
     } catch (error) {
       console.error("Failed to switch to camera:", error);
     }
   };
 
   return (
-    <div className="rounded-2xl glass-panel p-4 mb-4">
+    <div className="glass rounded-xl p-3 h-full">
       <div className="flex flex-col gap-3">
-        <p className="text-sm font-semibold text-ow-mist/70 uppercase tracking-wider">Video Source</p>
+        <p className="text-sm font-semibold text-textSecondary uppercase tracking-wider">Video Source</p>
 
         {/* Mode buttons */}
         <div className="grid grid-cols-3 gap-2">
-          {/* Demo Mode */}
           <button
             onClick={() => setSelectedMode(selectedMode === "demo" ? null : "demo")}
             className={`px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 flex items-center justify-center gap-2 ${
               selectedMode === "demo"
-                ? "bg-ow-teal/30 border border-ow-teal/50 text-ow-teal/90"
-                : "bg-ow-bg/40 border border-[rgba(255,255,255,0.08)] text-ow-mist/70 hover:bg-ow-bg/60"
+                ? "bg-card border border-accent/40 text-textPrimary"
+                : "bg-surface border border-border text-textSecondary hover:text-textPrimary"
             }`}
           >
             <Video size={14} />
             Demo
           </button>
 
-          {/* Upload Mode */}
           <button
             onClick={() => setSelectedMode(selectedMode === "upload" ? null : "upload")}
             className={`px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 flex items-center justify-center gap-2 ${
               selectedMode === "upload"
-                ? "bg-ow-teal/30 border border-ow-teal/50 text-ow-teal/90"
-                : "bg-ow-bg/40 border border-[rgba(255,255,255,0.08)] text-ow-mist/70 hover:bg-ow-bg/60"
+                ? "bg-card border border-accent/40 text-textPrimary"
+                : "bg-surface border border-border text-textSecondary hover:text-textPrimary"
             }`}
           >
             <Upload size={14} />
             Upload
           </button>
 
-          {/* Live Camera */}
           <button
             onClick={handleLiveCamera}
             disabled={switchMutation.isPending}
-            className="px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 flex items-center justify-center gap-2 bg-ow-alert-intrusion/20 border border-ow-alert-intrusion/30 text-ow-alert-intrusion/80 hover:bg-ow-alert-intrusion/30 disabled:opacity-50"
+            className="px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 flex items-center justify-center gap-2 bg-accent/20 border border-accent/40 text-accent hover:bg-accent/30 disabled:opacity-50"
           >
             {switchMutation.isPending ? <Loader size={14} className="animate-spin" /> : <Video size={14} />}
             Live
           </button>
         </div>
 
-        {/* Demo dropdown */}
         {selectedMode === "demo" && (
           <div className="space-y-2">
             {demoLoading ? (
               <div className="text-center py-3">
-                <Loader className="w-4 h-4 animate-spin inline text-ow-mist/50" />
+                <Loader className="w-4 h-4 animate-spin inline text-textMuted" />
               </div>
             ) : demoList?.videos.length ? (
-              <select
-                value={selectedDemo}
-                onChange={(e) => handleDemoSelect(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg bg-ow-bg/40 border border-[rgba(255,255,255,0.12)] text-ow-mist/80 text-sm focus:outline-none focus:border-ow-teal/50"
-              >
-                <option value="">Select a demo video...</option>
-                {demoList.videos.map((video) => (
-                  <option key={video} value={video}>
-                    {video.replace(".mp4", "").replace(/_/g, " ")}
-                  </option>
-                ))}
-              </select>
+              <div className="max-h-36 overflow-y-auto space-y-1">
+                {demoList.videos.map((video) => {
+                  const isSelected = selectedDemo === video;
+                  return (
+                    <button
+                      key={video}
+                      type="button"
+                      onClick={() => void handleDemoSelect(video)}
+                      className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+                        isSelected
+                          ? "bg-card border border-accent/40 text-textPrimary"
+                          : "bg-surface border border-border text-textSecondary hover:text-textPrimary"
+                      }`}
+                    >
+                      {formatDemoName(video)}
+                    </button>
+                  );
+                })}
+              </div>
             ) : (
-              <p className="text-xs text-ow-mist/50">No demo videos available for {moduleType}</p>
+              <p className="text-xs text-textSecondary">No demo videos available for {demoCategory}</p>
             )}
+
+            {loadedDemo ? (
+              <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-accent/10 border border-accent/30">
+                <Check size={14} className="text-accent mt-0.5 flex-shrink-0" />
+                <p className="text-xs text-accent">Demo loaded: {formatDemoName(loadedDemo)}</p>
+              </div>
+            ) : null}
           </div>
         )}
 
-        {/* Upload input */}
         {selectedMode === "upload" && (
           <div className="space-y-2">
             <input
@@ -205,18 +231,18 @@ export default function SourceSelector({ moduleType, onSourceChanged }: SourceSe
                 }
               }}
               disabled={switchMutation.isPending || deleteUploadMutation.isPending || uploadProgress > 0}
-              className="w-full px-3 py-2 rounded-lg bg-ow-bg/40 border border-dashed border-ow-mist/20 text-ow-mist/60 hover:border-ow-teal/40 hover:text-ow-teal/60 text-sm transition-colors disabled:opacity-50"
+              className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-textSecondary hover:text-textPrimary text-sm transition-colors disabled:opacity-50"
             >
               {uploadProgress > 0 ? `Uploading... ${uploadProgress}%` : "Choose Video File"}
             </button>
 
             {uploadedFilename && (
-              <div className="flex items-center justify-between gap-2 rounded-lg border border-[rgba(255,255,255,0.08)] bg-ow-bg/30 px-3 py-2">
-                <p className="text-xs text-ow-mist/60 truncate">Uploaded: {uploadedFilename}</p>
+              <div className="flex items-center justify-between gap-2 rounded-lg bg-surface border border-border px-3 py-2">
+                <p className="text-xs text-textSecondary truncate">Uploaded: {uploadedFilename}</p>
                 <button
                   onClick={handleDeleteUpload}
                   disabled={deleteUploadMutation.isPending || switchMutation.isPending}
-                  className="inline-flex items-center gap-1 rounded-md border border-red-500/30 bg-red-500/10 px-2 py-1 text-[11px] text-red-300 hover:bg-red-500/20 disabled:opacity-50"
+                  className="inline-flex items-center gap-1 rounded-md bg-threat-critical/15 border border-threat-critical/30 px-2 py-1 text-[11px] text-threat-critical hover:bg-threat-critical/25 disabled:opacity-50"
                 >
                   {deleteUploadMutation.isPending ? <Loader size={12} className="animate-spin" /> : <Trash2 size={12} />}
                   {deleteUploadMutation.isPending ? "Removing..." : "Remove"}
@@ -224,43 +250,35 @@ export default function SourceSelector({ moduleType, onSourceChanged }: SourceSe
               </div>
             )}
 
-            <p className="text-xs text-ow-mist/40">Max 200MB • MP4, AVI</p>
+            <p className="text-xs text-textMuted">Max 200MB • MP4, AVI</p>
           </div>
         )}
 
-        {/* Status */}
         {switchMutation.error && (
-          <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-ow-alert-intrusion/10 border border-ow-alert-intrusion/20">
-            <AlertCircle size={14} className="text-ow-alert-intrusion/60 mt-0.5 flex-shrink-0" />
-            <p className="text-xs text-ow-alert-intrusion/60">{(switchMutation.error as Error).message}</p>
+          <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-threat-critical/10 border border-threat-critical/30">
+            <AlertCircle size={14} className="text-threat-critical mt-0.5 flex-shrink-0" />
+            <p className="text-xs text-threat-critical">{(switchMutation.error as Error).message}</p>
           </div>
         )}
 
         {uploadError && (
-          <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-ow-alert-intrusion/10 border border-ow-alert-intrusion/20">
-            <AlertCircle size={14} className="text-ow-alert-intrusion/60 mt-0.5 flex-shrink-0" />
-            <p className="text-xs text-ow-alert-intrusion/60">{uploadError}</p>
-          </div>
-        )}
-
-        {switchMutation.isSuccess && (
-          <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-ow-teal/10 border border-ow-teal/20">
-            <Check size={14} className="text-ow-teal/60 mt-0.5 flex-shrink-0" />
-            <p className="text-xs text-ow-teal/60">Source switched successfully</p>
+          <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-threat-critical/10 border border-threat-critical/30">
+            <AlertCircle size={14} className="text-threat-critical mt-0.5 flex-shrink-0" />
+            <p className="text-xs text-threat-critical">{uploadError}</p>
           </div>
         )}
 
         {deleteUploadMutation.error && (
-          <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-ow-alert-intrusion/10 border border-ow-alert-intrusion/20">
-            <AlertCircle size={14} className="text-ow-alert-intrusion/60 mt-0.5 flex-shrink-0" />
-            <p className="text-xs text-ow-alert-intrusion/60">{(deleteUploadMutation.error as Error).message}</p>
+          <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-threat-critical/10 border border-threat-critical/30">
+            <AlertCircle size={14} className="text-threat-critical mt-0.5 flex-shrink-0" />
+            <p className="text-xs text-threat-critical">{(deleteUploadMutation.error as Error).message}</p>
           </div>
         )}
 
         {deleteUploadMutation.isSuccess && (
-          <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-ow-teal/10 border border-ow-teal/20">
-            <Check size={14} className="text-ow-teal/60 mt-0.5 flex-shrink-0" />
-            <p className="text-xs text-ow-teal/60">Uploaded video removed</p>
+          <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-accent/10 border border-accent/30">
+            <Check size={14} className="text-accent mt-0.5 flex-shrink-0" />
+            <p className="text-xs text-accent">Uploaded video removed</p>
           </div>
         )}
       </div>

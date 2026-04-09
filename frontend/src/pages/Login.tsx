@@ -33,68 +33,67 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-ow-bg">
+    <div className="min-h-screen flex items-center justify-center bg-bg">
       {/* Ambient */}
       <div className="fixed inset-0 pointer-events-none">
-        <div className="absolute top-1/3 left-1/3 w-96 h-96 bg-ow-accent/5 rounded-full blur-[120px]" />
-        <div className="absolute bottom-1/3 right-1/3 w-96 h-96 bg-ow-teal/8 rounded-full blur-[120px]" />
+        <div className="absolute top-1/3 left-1/3 w-96 h-96 bg-accent/10 rounded-full blur-[120px]" />
+        <div className="absolute bottom-1/3 right-1/3 w-96 h-96 bg-threat-info/10 rounded-full blur-[120px]" />
       </div>
 
       <div className="relative z-10 w-full max-w-md px-6">
         {/* Brand */}
         <div className="text-center mb-8">
-          <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-ow-accent to-ow-accent-dim flex items-center justify-center shadow-glow">
-            <Eye className="w-7 h-7 text-ow-bg" />
+          <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-accent flex items-center justify-center">
+            <Eye className="w-7 h-7 text-bg" />
           </div>
-          <h1 className="text-2xl font-bold tracking-widest text-ow-accent">
+          <h1 className="text-2xl font-bold tracking-widest text-accent">
             OVERWATCH
           </h1>
-          <p className="text-sm text-ow-mist/40 mt-1">Sign in to access the dashboard</p>
+          <p className="text-sm text-textSecondary mt-1">Sign in to access the dashboard</p>
         </div>
 
         {/* Form */}
         <form
           onSubmit={handleSubmit}
-          className="rounded-2xl glass-panel-heavy p-8 shadow-2xl space-y-5"
+          className="panel-base rounded-2xl p-8 space-y-5"
         >
           <div>
-            <label className="block text-xs text-ow-mist/50 uppercase tracking-wider mb-2">Email</label>
-            <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-ow-teal/8 border border-[rgba(255,255,255,0.06)] focus-within:border-ow-accent/30 transition-colors">
-              <UserIcon className="w-4 h-4 text-ow-mist/40" />
+            <label className="block text-xs text-textMuted uppercase tracking-wider mb-2">Email</label>
+            <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-surface border border-border focus-within:border-accent transition-colors">
+              <UserIcon className="w-4 h-4 text-textMuted" />
               <input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
-                className="bg-transparent text-sm text-ow-light/80 placeholder:text-ow-mist/25 outline-none w-full"
+                className="bg-transparent text-sm text-textPrimary placeholder:text-textMuted outline-none w-full"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-xs text-ow-mist/50 uppercase tracking-wider mb-2">Password</label>
-            <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-ow-teal/8 border border-[rgba(255,255,255,0.06)] focus-within:border-ow-accent/30 transition-colors">
-              <Lock className="w-4 h-4 text-ow-mist/40" />
+            <label className="block text-xs text-textMuted uppercase tracking-wider mb-2">Password</label>
+            <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-surface border border-border focus-within:border-accent transition-colors">
+              <Lock className="w-4 h-4 text-textMuted" />
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Enter password"
-                className="bg-transparent text-sm text-ow-light/80 placeholder:text-ow-mist/25 outline-none w-full"
+                className="bg-transparent text-sm text-textPrimary placeholder:text-textMuted outline-none w-full"
               />
             </div>
           </div>
 
           {error && (
-            <div className="text-xs text-ow-alert-intrusion bg-ow-alert-intrusion/10 border border-ow-alert-intrusion/20 rounded-lg px-3 py-2">
+            <div className="text-xs text-threat-critical bg-threat-critical/10 border border-threat-critical/30 rounded-lg px-3 py-2">
               {error}
             </div>
           )}
 
           <button
             type="submit"
-            className="w-full py-3 rounded-xl bg-gradient-to-r from-ow-accent to-ow-accent-dim text-sm font-semibold text-ow-bg
-                       hover:shadow-glow-hover transition-all"
+            className="w-full py-3 rounded-xl bg-accent text-sm font-semibold text-bg hover:bg-accent/90 transition-colors"
           >
             Sign In
           </button>
@@ -102,7 +101,7 @@ export default function Login() {
           <div className="mt-3 text-center">
             <Link
               to="/signup"
-              className="inline-block px-4 py-2 rounded-md border border-ow-accent/20 text-ow-accent text-sm font-medium hover:bg-ow-accent/8 transition-colors"
+              className="inline-block px-4 py-2 rounded-md border border-border text-accent text-sm font-medium hover:bg-card transition-colors"
             >
               Signup
             </Link>

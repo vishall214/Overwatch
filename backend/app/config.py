@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     storage_dir: str = "storage"
     snapshots_dir: str = "storage/snapshots"
     clips_dir: str = "storage/clips"
+    reports_dir: str = "storage/reports"
+    snapshot_retention_max_files: int = Field(default=1500, ge=1)
+    snapshot_cleanup_every_alerts: int = Field(default=25, ge=1)
 
     # ── Pipeline ─────────────────────────────────────────────────
     pipeline_skip_frames: int = 1  # Capture-stage frame skipping (1 = no skipping)
@@ -90,6 +93,34 @@ class Settings(BaseSettings):
     weapon_consecutive_threshold: int = 2  # Consecutive detections before alert
     weapon_cooldown_seconds: float = 10.0  # Seconds between alerts for same object
     weapon_classes: list[int] = [43, 76]  # COCO classes: 43=knife, 76=scissors
+
+    # ── Threat Scoring ───────────────────────────────────────────
+    enable_threat_scoring: bool = True
+    threat_weight_weapon_detected: int = Field(default=50, ge=0)
+    threat_weight_weapon_in_zone: int = Field(default=80, ge=0)
+    threat_weight_intrusion: int = Field(default=40, ge=0)
+    threat_weight_loitering: int = Field(default=20, ge=0)
+    threat_weight_crowd: int = Field(default=30, ge=0)
+    threat_bonus_weapon_zone: int = Field(default=30, ge=0)
+    threat_bonus_weapon_crowd: int = Field(default=20, ge=0)
+    threat_bonus_intrusion_weapon: int = Field(default=25, ge=0)
+    threat_level_medium_threshold: int = Field(default=30, ge=0)
+    threat_level_high_threshold: int = Field(default=70, ge=0)
+    threat_level_critical_threshold: int = Field(default=120, ge=0)
+
+    # ── Reporting / Scheduler / Email ──────────────────────────
+    report_scheduler_enabled: bool = True
+    report_scheduler_poll_seconds: int = Field(default=30, ge=5, le=300)
+    report_daily_time_utc: str = "23:55"  # HH:MM format
+    report_weekly_day_utc: int = Field(default=0, ge=0, le=6)  # Monday=0
+    report_email_enabled: bool = False
+    report_email_recipients: list[str] = []
+    smtp_host: str = ""
+    smtp_port: int = Field(default=587, ge=1, le=65535)
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_use_tls: bool = True
 
     model_config = {
         "env_prefix": "OVERWATCH_",

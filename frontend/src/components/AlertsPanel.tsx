@@ -1,27 +1,193 @@
-import { useEffect, useRef } from "react";
+﻿import { useEffect, useRef, useState, type ReactNode } from "react";
 import gsap from "gsap";
+import { useNavigate } from "react-router-dom";
+import { AlertTriangle, Crosshair, Eye, ShieldAlert, UserCheck, Users } from "lucide-react";
 import { useAlerts } from "../hooks/useAlerts";
-import { API } from "../api/config";
-import { AlertTriangle, ShieldAlert, Users, Eye, Crosshair, UserCheck } from "lucide-react";
-import { formatEventLabel, isWeaponEventType, normalizeEventType } from "../utils/normalization";
+import { extractSnapshotFilename, resolveSnapshotSrc } from "../utils/snapshot";
+import { resolveThreatInfo } from "../utils/threat";
+import { formatEventLabel, normalizeEventType } from "../utils/normalization";
+import { threatBadgeBgClasses, threatColorClasses } from "../theme/threat";
 
-const eventConfig: Record<string, { icon: typeof AlertTriangle; color: string }> = {
-  intrusion: { icon: ShieldAlert, color: "#e74c3c" },
-  loitering: { icon: Eye, color: "#f39c12" },
-  crowd: { icon: Users, color: "#3498db" },
-  weapon_in_zone: { icon: Crosshair, color: "#e74c3c" },
-  weapon_detected: { icon: Crosshair, color: "#9b59b6" },
-  face_match: { icon: UserCheck, color: "#52c9a8" },
+const eventIcons: Record<string, typeof AlertTriangle> = {
+  intrusion: ShieldAlert,
+  loitering: Eye,
+  crowd: Users,
+  weapon_in_zone: Crosshair,
+  weapon_detected: Crosshair,
+  face_match: UserCheck,
 };
 
-export default function AlertsPanel() {
+export const severityStyles = {
+  CRITICAL: "border-l-4 border-red-500 bg-red-500/5",
+  HIGH: "border-l-4 border-orange-500 bg-orange-500/5",
+  MEDIUM: "border-l-4 border-yellow-500 bg-yellow-500/5",
+  LOW: "border-l-4 border-teal-400 bg-teal-400/5",
+} as const;
+
+const objectMetadataKeys = [
+  "object",
+  "object_type",
+  "object_label",
+  "detected_object",
+  "class_name",
+  "label",
+  "weapon_type",
+] as const;
+
+function getMetadataText(value: unknown): string | null {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return null;
+}
+
+function extractObjectLabel(metadata: Record<string, unknown>): string | null {
+  for (const key of objectMetadataKeys) {
+    const text = getMetadataText(metadata[key]);
+    if (text) return text;
+  }
+  return null;
+}
+
+export type AlertItem = {
+  id: number | string;
+  event_type: string;
+  timestamp: string;
+  zone?: string;
+  track_id?: number | null;
+  metadata?: Record<string, unknown>;
+  snapshot_filename?: string;
+  snapshot_path?: string;
+  snapshot_url?: string;
+};
+
+export type AlertCardModel = {
+  id: number | string;
+  icon: typeof AlertTriangle;
+  eventType: string;
+  title: string;
+  severity: string;
+  zone: string;
+  objectLabel: string | null;
+  contextText: string;
+  timeText: string;
+  threatScore: number;
+  snapshotSrc: string | null;
+  metadata: Record<string, unknown>;
+};
+
+export function buildAlertCardModel(alert: AlertItem): AlertCardModel {
+  const normalizedType = normalizeEventType(alert.event_type);
+  const Icon = eventIcons[normalizedType] ?? AlertTriangle;
+  const metadata = (alert.metadata as Record<string, unknown>) ?? {};
+  const snapshotFile = extractSnapshotFilename(alert as Record<string, unknown>);
+  const snapshotSrc = snapshotFile ? resolveSnapshotSrc(alert as Record<string, unknown>) : null;
+  const threat = resolveThreatInfo(alert as Record<string, unknown>);
+  const zone = alert.zone?.trim() || "--";
+  const objectLabel = extractObjectLabel(metadata);
+  const contextText = [zone !== "--" ? zone : null, objectLabel].filter(Boolean).join(" / ") || "Context unavailable";
+
+  return {
+    id: alert.id,
+    icon: Icon,
+    eventType: normalizedType,
+    title: formatEventLabel(normalizedType),
+    severity: threat.level,
+    zone,
+    objectLabel,
+    contextText,
+    timeText: new Date(alert.timestamp).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    }),
+    threatScore: threat.score,
+    snapshotSrc,
+    metadata,
+  };
+}
+
+function SnapshotThumb({ src }: { src: string | null }) {
+  const [broken, setBroken] = useState(false);
+  if (!src || broken) {
+    return (
+      <div className="w-14 h-14 rounded-lg bg-surface border border-border flex items-center justify-center flex-shrink-0">
+        <AlertTriangle className="w-4 h-4 text-textMuted" />
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={src}
+      alt="snapshot"
+      className="w-14 h-14 rounded-lg object-cover flex-shrink-0 border border-border"
+      loading="lazy"
+      onError={() => setBroken(true)}
+    />
+  );
+}
+
+export function AlertCard({
+  alert,
+  compact = false,
+  selected = false,
+  showSnapshot = true,
+  onClick,
+}: {
+  alert: AlertItem;
+  compact?: boolean;
+  selected?: boolean;
+  showSnapshot?: boolean;
+  onClick?: (alertId: number | string) => void;
+}) {
+  const model = buildAlertCardModel(alert);
+  const severityClass = severityStyles[model.severity as keyof typeof severityStyles] ?? severityStyles.LOW;
+  const levelClass = threatColorClasses[model.severity as keyof typeof threatColorClasses];
+  const levelBgClass = threatBadgeBgClasses[model.severity as keyof typeof threatBadgeBgClasses];
+
+  return (
+    <button
+      type="button"
+      onClick={() => onClick?.(model.id)}
+      className={`alert-card w-full text-left rounded-xl p-3 border border-border transition-all hover:bg-card flex items-start gap-3 ${severityClass} ${
+        selected ? "ring-2 ring-teal-400/60 scale-[1.01]" : ""
+      }`}
+    >
+      {showSnapshot ? (
+        <SnapshotThumb src={model.snapshotSrc} />
+      ) : (
+        <div className="w-10 h-10 rounded-lg bg-surface border border-border flex items-center justify-center flex-shrink-0">
+          <model.icon className="w-4 h-4 text-textSecondary" />
+        </div>
+      )}
+
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-sm font-semibold text-textPrimary truncate">{model.title}</span>
+          <span
+            className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase border whitespace-nowrap ${levelClass} ${levelBgClass}`}
+          >
+            {model.severity}
+          </span>
+        </div>
+        <p className="text-xs text-textSecondary mt-1">{model.timeText}</p>
+        <p className={`text-xs text-textMuted mt-1 ${compact ? "truncate" : ""}`}>{model.contextText}</p>
+        <p className="text-xs text-textMuted mt-1">Threat {model.threatScore}</p>
+      </div>
+    </button>
+  );
+}
+
+export default function AlertsPanel({ compact = false }: { compact?: boolean }) {
+  const navigate = useNavigate();
   const { data, isLoading } = useAlerts(20);
   const listRef = useRef<HTMLDivElement>(null);
   const prevCountRef = useRef(0);
-  const MAX_VISIBLE_ALERTS = 10;
+  const maxVisibleAlerts = compact ? 6 : 8;
 
   useEffect(() => {
     if (!data || !listRef.current) return;
+
     const newCount = data.alerts.length;
     if (newCount > prevCountRef.current) {
       const newCards = listRef.current.querySelectorAll(".alert-card");
@@ -34,118 +200,59 @@ export default function AlertsPanel() {
         );
       }
     }
+
     prevCountRef.current = newCount;
   }, [data]);
 
   if (isLoading) {
     return (
-      <GlassCard title="Alerts">
-        <div className="flex items-center justify-center h-32 text-ow-mist/40 text-sm">Loading alerts...</div>
-      </GlassCard>
+      <PanelCard title="Alerts" compact={compact}>
+        <div className="flex items-center justify-center h-32 text-sm text-textSecondary">Loading alerts...</div>
+      </PanelCard>
     );
   }
 
-  const alerts = (data?.alerts ?? []).slice(0, MAX_VISIBLE_ALERTS);
-
-  // Priority sort: critical weapon > warning weapon > intrusion > loitering > crowd > other
-  const priority: Record<string, number> = {
-    weapon_in_zone: 0,
-    weapon_detected: 1,
-    intrusion: 2,
-    loitering: 3,
-    crowd: 4,
-  };
-  const sorted = [...alerts].sort((a, b) => {
-    const pa = priority[normalizeEventType(a.event_type)] ?? 9;
-    const pb = priority[normalizeEventType(b.event_type)] ?? 9;
-    if (pa !== pb) return pa - pb;
-    return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
-  });
+  const sorted = [...(data?.alerts ?? [])]
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+    .slice(0, maxVisibleAlerts);
 
   return (
-    <GlassCard title="Alerts" badge={sorted.length}>
-      <div ref={listRef} className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+    <PanelCard title="Alerts" badge={sorted.length} compact={compact}>
+      <div ref={listRef} className={`space-y-2 overflow-y-auto pr-1 ${compact ? "flex-1 min-h-0" : "max-h-[320px]"}`}>
         {sorted.length === 0 ? (
-          <div className="text-center text-ow-mist/30 text-sm py-6">No alerts detected</div>
+          <div className="text-center text-sm text-textSecondary py-6">No alerts detected</div>
         ) : (
-          sorted.map((alert) => {
-            const normalizedType = normalizeEventType(alert.event_type);
-            const cfg = eventConfig[normalizedType] ?? { icon: AlertTriangle, color: "#52c9a8" };
-            const Icon = cfg.icon;
-            const snapshotFile = alert.snapshot_path?.split("/").pop() ?? "";
-            const isWeapon = isWeaponEventType(alert.event_type);
-            const isCriticalWeapon = normalizedType === "weapon_in_zone";
-            return (
-              <div
-                key={alert.id}
-                className={`alert-card flex items-start gap-3 p-3 rounded-xl transition-all duration-200 cursor-default group ${
-                  isCriticalWeapon
-                    ? "bg-red-500/10 border-2 border-red-500/30 hover:bg-red-500/15 hover:border-red-500/50 shadow-[0_0_12px_rgba(239,68,68,0.15)]"
-                    : isWeapon
-                    ? "bg-[rgba(155,89,182,0.12)] border-2 border-[rgba(155,89,182,0.35)] hover:bg-[rgba(155,89,182,0.18)] hover:border-[rgba(155,89,182,0.55)] shadow-[0_0_12px_rgba(155,89,182,0.18)]"
-                    : "bg-ow-teal/8 border border-[rgba(255,255,255,0.05)] hover:bg-ow-teal/15 hover:border-ow-accent/15"
-                }`}
-              >
-                {snapshotFile && (
-                  <img
-                    src={API.snapshots(snapshotFile)}
-                    alt="snapshot"
-                    className="w-14 h-14 rounded-lg object-cover flex-shrink-0 border border-[rgba(255,255,255,0.08)]"
-                    loading="lazy"
-                  />
-                )}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <Icon className="w-3.5 h-3.5" style={{ color: cfg.color }} />
-                    <span className="text-sm font-medium capitalize text-ow-light/90">
-                      {formatEventLabel(normalizedType)}
-                    </span>
-                    {isWeapon && typeof alert.metadata?.object_type === "string" ? (
-                      <span
-                        className="px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase"
-                        style={{
-                          color: isCriticalWeapon ? "#e74c3c" : "#9b59b6",
-                          backgroundColor: isCriticalWeapon
-                            ? "rgba(231,76,60,0.15)"
-                            : "rgba(155,89,182,0.15)",
-                        }}
-                      >
-                        {alert.metadata.object_type}
-                      </span>
-                    ) : null}
-                  </div>
-                  <div className="text-xs text-ow-mist/50 mt-0.5">
-                    {isWeapon
-                      ? `${normalizedType === "weapon_in_zone" ? `Zone: ${(alert.metadata?.zone_name as string) || alert.zone || "—"} · ` : ""}Confidence: ${
-                          typeof alert.metadata?.confidence === "number"
-                            ? `${(Number(alert.metadata.confidence) * 100).toFixed(0)}%`
-                            : "—"
-                        }`
-                      : `Zone: ${alert.zone || "—"} · Track ${alert.track_id ?? "—"}`}
-                  </div>
-                  <div className="text-[10px] text-ow-mist/25 mt-1 font-mono">
-                    {new Date(alert.timestamp).toLocaleTimeString()}
-                  </div>
-                </div>
-              </div>
-            );
-          })
+          sorted.map((alert) => (
+            <AlertCard
+              key={alert.id}
+              alert={alert}
+              compact={compact}
+              showSnapshot={!compact}
+              onClick={(alertId) => navigate(`/alerts?selected=${alertId}`)}
+            />
+          ))
         )}
       </div>
-    </GlassCard>
+    </PanelCard>
   );
 }
 
-function GlassCard({ title, badge, children }: { title: string; badge?: number; children: React.ReactNode }) {
+function PanelCard({
+  title,
+  badge,
+  children,
+  compact = false,
+}: {
+  title: string;
+  badge?: number;
+  children: ReactNode;
+  compact?: boolean;
+}) {
   return (
-    <div className="glass-panel rounded-2xl p-4 h-full">
+    <div className={compact ? "h-full flex flex-col" : "glass rounded-xl p-4 h-full flex flex-col"}>
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold text-ow-mist/70 uppercase tracking-wider">{title}</h3>
-        {badge !== undefined && (
-          <span className="px-2 py-0.5 rounded-full bg-ow-accent/10 text-ow-accent text-xs font-mono">
-            {badge}
-          </span>
-        )}
+        <h3 className="text-base font-semibold text-textPrimary">{title}</h3>
+        {badge !== undefined ? <span className="text-xs text-textSecondary">{badge}</span> : null}
       </div>
       {children}
     </div>

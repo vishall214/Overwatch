@@ -9,6 +9,7 @@ Phase 5: PostgreSQL persistence via SQLAlchemy.
 
 import logging
 import os
+import threading
 import time as _time
 from datetime import datetime, timezone
 from typing import Optional
@@ -42,6 +43,18 @@ class AlertService:
         # Maps "{event_type}_{zone}" -> last alert monotonic timestamp
         self._recent_alerts: dict[str, float] = {}
         self._duplicate_window: float = 10.0  # seconds
+        self._snapshot_cleanup_counter: int = 0
+        self._snapshot_lock = threading.Lock()
+
+        # Keep snapshot storage bounded to avoid unbounded disk growth.
+        self._snapshot_retention_max_files = max(
+            1,
+            int(settings.snapshot_retention_max_files),
+        )
+        self._snapshot_cleanup_every_alerts = max(
+            1,
+            int(settings.snapshot_cleanup_every_alerts),
+        )
 
     def create_alert(
         self,
@@ -140,14 +153,63 @@ class AlertService:
         Returns:
             str: Path to the saved snapshot, or empty string on failure.
         """
-        time_str = timestamp.strftime("%Y%m%d_%H%M%S")
+        time_str = timestamp.strftime("%Y%m%d_%H%M%S_%f")
         filename = f"{event_type}_{time_str}.jpg"
         filepath = os.path.join(self._settings.snapshots_dir, filename)
 
         try:
-            cv2.imwrite(filepath, frame)
+            saved = cv2.imwrite(filepath, frame)
+            if not saved:
+                logger.error("OpenCV failed to encode snapshot: %s", filepath)
+                return ""
+
             logger.debug("Snapshot saved: %s", filepath)
-            return filepath
+
+            with self._snapshot_lock:
+                self._snapshot_cleanup_counter += 1
+                if self._snapshot_cleanup_counter % self._snapshot_cleanup_every_alerts == 0:
+                    self._enforce_snapshot_retention()
+
+            # Store only filename for cross-platform portability.
+            return filename
         except Exception:
             logger.exception("Failed to save snapshot: %s", filepath)
             return ""
+
+    def _enforce_snapshot_retention(self) -> None:
+        """Delete oldest snapshots when retention limit is exceeded."""
+        try:
+            files = []
+            for name in os.listdir(self._settings.snapshots_dir):
+                lower = name.lower()
+                if not (lower.endswith(".jpg") or lower.endswith(".jpeg") or lower.endswith(".png")):
+                    continue
+                path = os.path.join(self._settings.snapshots_dir, name)
+                if os.path.isfile(path):
+                    files.append(path)
+
+            if len(files) <= self._snapshot_retention_max_files:
+                return
+
+            files.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+            stale = files[self._snapshot_retention_max_files :]
+
+            deleted = 0
+            for path in stale:
+                try:
+                    os.remove(path)
+                    deleted += 1
+                except FileNotFoundError:
+                    continue
+                except OSError:
+                    logger.warning("Failed deleting stale snapshot: %s", path)
+
+            if deleted > 0:
+                logger.info(
+                    "Snapshot retention applied: deleted=%d kept=%d dir=%s",
+                    deleted,
+                    self._snapshot_retention_max_files,
+                    self._settings.snapshots_dir,
+                )
+        except Exception:
+            logger.exception("Snapshot retention pass failed")

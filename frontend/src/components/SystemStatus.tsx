@@ -1,70 +1,98 @@
-import { useSystemStatus, useSystemMetrics } from "../hooks/useSystemStatus";
+import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { getSourceInfo } from "../api/video";
+import { useAlerts } from "../hooks/useAlerts";
+import { useSystemStatus } from "../hooks/useSystemStatus";
 import { useCameraStatus } from "../hooks/useCameraStatus";
-import { Activity, Camera, Gauge, AlertTriangle, Layers } from "lucide-react";
+import { AlertTriangle, Camera, Gauge, Radar, Video } from "lucide-react";
 
-export default function SystemStatus() {
+type MonitorModule = "intrusion" | "loitering" | "crowd" | "weapon_detection";
+
+const MODULE_LABELS: Record<MonitorModule, string> = {
+  intrusion: "Intrusion",
+  loitering: "Loitering",
+  crowd: "Crowd",
+  weapon_detection: "Weapons",
+};
+
+const SOURCE_LABELS: Record<string, string> = {
+  camera: "Live",
+  upload: "Upload",
+  demo: "Demo",
+};
+
+export default function SystemStatus({ activeModule }: { activeModule?: MonitorModule }) {
   const { data: status } = useSystemStatus();
   const { data: cameraStatus } = useCameraStatus();
-  const { data: metrics } = useSystemMetrics();
+  const { data: sourceInfo } = useQuery({
+    queryKey: ["sourceInfo"],
+    queryFn: getSourceInfo,
+    refetchInterval: 2000,
+  });
+  const { data: alertsData } = useAlerts(25);
   const cameraOnline = cameraStatus?.is_running ?? status?.camera_running ?? false;
 
-  const queueTotal = metrics?.queues
-    ? Object.values(metrics.queues).reduce((a, b) => a + b, 0)
-    : 0;
+  const resolvedModule = activeModule ?? (sourceInfo?.active_module as MonitorModule | undefined);
+  const lastAlertTime = useMemo(() => {
+    const alerts = alertsData?.alerts ?? [];
+    if (!alerts.length) return "--";
+    const latest = alerts.reduce((current, next) =>
+      new Date(next.timestamp).getTime() > new Date(current.timestamp).getTime() ? next : current
+    );
+    return new Date(latest.timestamp).toLocaleTimeString();
+  }, [alertsData?.alerts]);
 
   const stats = [
     {
       label: "Camera",
       value: cameraOnline ? "Online" : "Offline",
       icon: Camera,
-      color: cameraOnline ? "text-ow-accent" : "text-ow-alert-intrusion",
+      color: cameraOnline ? "text-accent" : "text-threat-critical",
     },
     {
-      label: "Pipeline FPS",
+      label: "FPS",
       value: status?.pipeline_fps?.toFixed(1) ?? "—",
       icon: Gauge,
-      color: "text-ow-accent",
+      color: "text-accent",
     },
     {
-      label: "Alerts Total",
+      label: "Alerts",
       value: status?.alerts_total?.toString() ?? "0",
       icon: AlertTriangle,
-      color: "text-ow-alert-loitering",
+      color: "text-threat-high",
     },
     {
-      label: "Queue Depth",
-      value: queueTotal.toString(),
-      icon: Layers,
-      color: "text-ow-alert-crowd",
+      label: "Active Module",
+      value: resolvedModule ? MODULE_LABELS[resolvedModule] : "None",
+      icon: Radar,
+      color: "text-textPrimary",
     },
     {
-      label: "Capture Items",
-      value: metrics?.capture?.items_processed?.toString() ?? "—",
-      icon: Activity,
-      color: "text-ow-accent-dim",
+      label: "Source",
+      value: sourceInfo?.source_type ? SOURCE_LABELS[sourceInfo.source_type] ?? sourceInfo.source_type : "Unknown",
+      icon: Video,
+      color: "text-textSecondary",
     },
     {
-      label: "Inference Avg",
-      value: metrics?.inference?.processing_time_avg != null
-        ? `${(Number(metrics.inference.processing_time_avg) * 1000).toFixed(0)}ms`
-        : "—",
-      icon: Activity,
-      color: "text-ow-mist",
+      label: "Last Alert",
+      value: lastAlertTime,
+      icon: AlertTriangle,
+      color: "text-textSecondary",
     },
   ];
 
   return (
-    <div className="glass-panel rounded-2xl p-4 h-full">
-      <h3 className="text-sm font-semibold text-ow-mist/70 uppercase tracking-wider mb-3">System</h3>
+    <div className="glass glass-hover rounded-xl p-4 h-full">
+      <h3 className="text-sm font-semibold text-textSecondary uppercase tracking-wider mb-3">System</h3>
       <div className="space-y-2">
         {stats.map((s) => (
           <div
             key={s.label}
-            className="flex items-center justify-between p-3 rounded-xl bg-ow-teal/8 border border-[rgba(255,255,255,0.04)]"
+            className="glass rounded-lg px-3 py-2 flex items-center justify-between"
           >
             <div className="flex items-center gap-3">
               <s.icon className={`w-4 h-4 ${s.color}`} />
-              <span className="text-sm text-ow-mist/60">{s.label}</span>
+              <span className="text-sm text-textSecondary">{s.label}</span>
             </div>
             <span className={`text-sm font-mono font-semibold ${s.color}`}>{s.value}</span>
           </div>

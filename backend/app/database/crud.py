@@ -4,16 +4,37 @@ OVERWATCH — Database CRUD Operations
 Functions for creating and querying alert records.
 """
 
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 import logging
 from typing import Optional
 
-from sqlalchemy import func, text
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from .models import AlertRow, FaceRow, Zone, User
 
 logger = logging.getLogger(__name__)
+
+_MAX_RANGE_HOURS = 24 * 30
+
+
+def _extract_threat_context(metadata: Optional[dict]) -> tuple[int, str]:
+    """Return (score, level) from alert metadata with safe defaults."""
+    if not isinstance(metadata, dict):
+        return 0, "LOW"
+
+    raw_score = metadata.get("threat_score", 0)
+    try:
+        score = int(raw_score)
+    except (TypeError, ValueError):
+        score = 0
+
+    raw_level = str(metadata.get("threat_level", "LOW")).upper()
+    if raw_level not in {"LOW", "MEDIUM", "HIGH", "CRITICAL"}:
+        raw_level = "LOW"
+
+    return max(0, score), raw_level
 
 
 def create_alert_row(
@@ -174,38 +195,55 @@ def get_alerts_over_time(
     if interval not in ["minute", "hour"]:
         interval = "minute"
 
-    if range_hours < 1 or range_hours > 24:
+    if range_hours < 1 or range_hours > _MAX_RANGE_HOURS:
         range_hours = 1
 
-    # Determine SQL date truncation
-    trunc_str = f"'{interval}'" if interval else "'minute'"
-    interval_sql = f"DATE_TRUNC({trunc_str}, timestamp)"
-
-    # Build query with parameterized time window
     cutoff = datetime.now(timezone.utc) - timedelta(hours=range_hours)
 
-    query = f"""
-        SELECT
-            {interval_sql} AS bucket,
-            COUNT(*) as count
-        FROM alerts
-        WHERE timestamp >= :cutoff
-        GROUP BY bucket
-        ORDER BY bucket ASC
-    """
+    rows = (
+        db.query(AlertRow.timestamp)
+        .filter(AlertRow.timestamp >= cutoff)
+        .order_by(AlertRow.timestamp.asc())
+        .all()
+    )
 
-    rows = db.execute(
-        text(query),
-        {"cutoff": cutoff},
-    ).fetchall()
+    def _to_utc(ts: datetime) -> datetime:
+        if ts.tzinfo is None:
+            return ts.replace(tzinfo=timezone.utc)
+        return ts.astimezone(timezone.utc)
 
-    return [
-        {
-            "time": row[0].isoformat() if row[0] else "",
-            "count": row[1],
-        }
-        for row in rows
-    ]
+    bucket_counts: dict[datetime, int] = defaultdict(int)
+    for (timestamp,) in rows:
+        if timestamp is None:
+            continue
+        ts = _to_utc(timestamp)
+        if interval == "hour":
+            bucket = ts.replace(minute=0, second=0, microsecond=0)
+        else:
+            bucket = ts.replace(second=0, microsecond=0)
+        bucket_counts[bucket] += 1
+
+    now = datetime.now(timezone.utc)
+    if interval == "hour":
+        cursor = cutoff.replace(minute=0, second=0, microsecond=0)
+        end = now.replace(minute=0, second=0, microsecond=0)
+        step = timedelta(hours=1)
+    else:
+        cursor = cutoff.replace(second=0, microsecond=0)
+        end = now.replace(second=0, microsecond=0)
+        step = timedelta(minutes=1)
+
+    points: list[dict] = []
+    while cursor <= end:
+        points.append(
+            {
+                "time": cursor.isoformat(),
+                "count": int(bucket_counts.get(cursor, 0)),
+            }
+        )
+        cursor += step
+
+    return points
 
 
 def get_event_distribution(
@@ -224,7 +262,7 @@ def get_event_distribution(
     Returns:
         Dict with event_type as key and count as value.
     """
-    if range_hours < 1 or range_hours > 24:
+    if range_hours < 1 or range_hours > _MAX_RANGE_HOURS:
         range_hours = 24
 
     cutoff = datetime.now(timezone.utc) - timedelta(hours=range_hours)
@@ -245,7 +283,7 @@ def get_event_distribution(
 def get_alert_summary(
     db: Session,
     range_hours: int = 24,
-) -> dict[str, int]:
+) -> dict[str, int | float]:
     """
     Get summary of alerts by type and total count.
 
@@ -256,7 +294,7 @@ def get_alert_summary(
     Returns:
         Dict with total, intrusion, loitering, crowd, weapon and face counts.
     """
-    if range_hours < 1 or range_hours > 24:
+    if range_hours < 1 or range_hours > _MAX_RANGE_HOURS:
         range_hours = 24
 
     cutoff = datetime.now(timezone.utc) - timedelta(hours=range_hours)
@@ -273,6 +311,8 @@ def get_alert_summary(
     weapon_in_zone = distribution.get("weapon_in_zone", 0)
     weapon_total = weapon_detected + weapon_in_zone
 
+    threat = get_threat_metrics(db, range_hours, peak_limit=1)
+
     return {
         "total": total,
         "intrusion": distribution.get("intrusion", 0),
@@ -283,6 +323,75 @@ def get_alert_summary(
         # Keep legacy key for backward compatibility with older clients.
         "dangerous_object": weapon_total,
         "face_match": distribution.get("face_match", 0),
+        "avg_threat_score": float(threat["avg_threat_score"]),
+        "peak_threat_score": int(threat["peak_threat_score"]),
+    }
+
+
+def get_threat_metrics(
+    db: Session,
+    range_hours: int = 24,
+    peak_limit: int = 5,
+) -> dict:
+    """Aggregate threat-level distribution, average threat score, and peak threat events."""
+    if range_hours < 1 or range_hours > _MAX_RANGE_HOURS:
+        range_hours = 24
+    if peak_limit < 1:
+        peak_limit = 1
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=range_hours)
+    rows = (
+        db.query(AlertRow)
+        .filter(AlertRow.timestamp >= cutoff)
+        .order_by(AlertRow.timestamp.desc())
+        .all()
+    )
+
+    distribution = {
+        "LOW": 0,
+        "MEDIUM": 0,
+        "HIGH": 0,
+        "CRITICAL": 0,
+    }
+    scored_events: list[dict] = []
+
+    for row in rows:
+        score, level = _extract_threat_context(row.metadata_)
+        distribution[level] = distribution.get(level, 0) + 1
+        scored_events.append(
+            {
+                "id": row.id,
+                "event_type": row.event_type,
+                "zone": row.zone or "",
+                "timestamp": row.timestamp.isoformat() if row.timestamp else "",
+                "threat_score": score,
+                "threat_level": level,
+            }
+        )
+
+    avg_score = 0.0
+    if scored_events:
+        avg_score = round(
+            sum(event["threat_score"] for event in scored_events) / len(scored_events),
+            1,
+        )
+
+    peak_events = sorted(
+        scored_events,
+        key=lambda event: (
+            int(event["threat_score"]),
+            str(event["timestamp"]),
+        ),
+        reverse=True,
+    )[:peak_limit]
+
+    peak_score = peak_events[0]["threat_score"] if peak_events else 0
+
+    return {
+        "distribution": distribution,
+        "avg_threat_score": avg_score,
+        "peak_threat_score": peak_score,
+        "peak_events": peak_events,
     }
 
 

@@ -1,8 +1,9 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
 import {
   clearAuthSession,
   getStoredUserEmail,
   getToken,
+  onAuthInvalidated,
   setAuthSession,
 } from "../api/auth";
 import { login as loginRequest, signup as signupRequest } from "../services/authService";
@@ -21,6 +22,13 @@ const AuthContext = createContext<AuthState | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(() => getToken());
   const [user, setUser] = useState<string | null>(() => getStoredUserEmail());
+
+  useEffect(() => {
+    return onAuthInvalidated(() => {
+      setToken(null);
+      setUser(null);
+    });
+  }, []);
 
   const login = useCallback(async (email: string, password: string): Promise<void> => {
     const res = await loginRequest(email, password);

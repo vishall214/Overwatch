@@ -6,6 +6,10 @@ export interface Alert {
   zone: string;
   metadata: Record<string, unknown>;
   snapshot_path: string;
+  snapshot_filename?: string;
+  snapshot_url?: string;
+  threat_score?: number;
+  threat_level?: string;
 }
 
 export interface AlertListResponse {
