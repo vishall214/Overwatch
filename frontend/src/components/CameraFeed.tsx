@@ -94,7 +94,7 @@ const CameraFeed = React.memo(function CameraFeed({ moduleType }: CameraFeedProp
     cancelAnimationFrame(rafRef.current);
 
     return (
-      <div className="relative w-full h-full rounded-2xl glass-strong p-2">
+      <div className="relative w-full h-full rounded-2xl glass-strong p-2 pointer-events-none">
         <div className="relative w-full h-full rounded-xl overflow-hidden">
           <OfflineOverlay />
           <div className="absolute bottom-4 left-4 px-3 py-1 rounded-lg glass">
@@ -106,11 +106,11 @@ const CameraFeed = React.memo(function CameraFeed({ moduleType }: CameraFeedProp
   }
 
   return (
-    <div className="relative w-full h-full rounded-2xl glass-strong p-2">
+    <div className="relative w-full h-full rounded-2xl glass-strong p-2 pointer-events-none">
       <div className="relative w-full h-full rounded-xl overflow-hidden">
         <canvas
           ref={canvasRef}
-          className="w-full h-full object-contain bg-bg"
+          className="w-full h-full object-contain bg-bg pointer-events-none"
         />
 
         {!moduleType ? (

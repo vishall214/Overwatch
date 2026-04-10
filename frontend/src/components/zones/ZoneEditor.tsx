@@ -12,30 +12,30 @@ interface ZoneStyle {
 
 const ZONE_STYLES: Record<string, ZoneStyle> = {
   intrusion: {
-    fillClass: "bg-threat-critical/20",
-    borderClass: "border-threat-critical",
-    labelClass: "text-threat-critical",
-    handleClass: "bg-threat-critical",
+    fillClass: "bg-teal-400/10",
+    borderClass: "border-teal-300/90",
+    labelClass: "text-teal-100",
+    handleClass: "bg-teal-300 border border-teal-100 shadow-sm shadow-teal-900/40",
   },
   loitering: {
-    fillClass: "bg-threat-high/20",
-    borderClass: "border-threat-high",
-    labelClass: "text-threat-high",
-    handleClass: "bg-threat-high",
+    fillClass: "bg-teal-400/10",
+    borderClass: "border-teal-300/90",
+    labelClass: "text-teal-100",
+    handleClass: "bg-teal-300 border border-teal-100 shadow-sm shadow-teal-900/40",
   },
   crowd: {
-    fillClass: "bg-threat-medium/20",
-    borderClass: "border-threat-medium",
-    labelClass: "text-threat-medium",
-    handleClass: "bg-threat-medium",
+    fillClass: "bg-teal-400/10",
+    borderClass: "border-teal-300/90",
+    labelClass: "text-teal-100",
+    handleClass: "bg-teal-300 border border-teal-100 shadow-sm shadow-teal-900/40",
   },
 };
 
 const DEFAULT_STYLE: ZoneStyle = {
-  fillClass: "bg-accent/20",
-  borderClass: "border-accent",
-  labelClass: "text-accent",
-  handleClass: "bg-accent",
+  fillClass: "bg-teal-400/10",
+  borderClass: "border-teal-300/90",
+  labelClass: "text-teal-100",
+  handleClass: "bg-teal-300 border border-teal-100 shadow-sm shadow-teal-900/40",
 };
 
 interface Rect {
@@ -75,6 +75,17 @@ interface PointerSample {
   rawX: number;
   rawY: number;
   inViewport: boolean;
+}
+
+type ZoneTypeValue = "intrusion" | "loitering" | "crowd";
+
+interface ZoneEditorProps {
+  visible?: boolean;
+  drawModeExternal?: boolean;
+  onDrawModeChange?: (nextDrawMode: boolean) => void;
+  clearSignal?: number;
+  zoneTypeExternal?: ZoneTypeValue;
+  showControls?: boolean;
 }
 
 const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
@@ -126,16 +137,24 @@ const computeViewport = (
   };
 };
 
-const ZoneEditor: React.FC = () => {
+const ZoneEditor: React.FC<ZoneEditorProps> = ({
+  visible = true,
+  drawModeExternal,
+  onDrawModeChange,
+  clearSignal,
+  zoneTypeExternal,
+  showControls = true,
+}) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const { imageElement } = useCameraStream();
   const { zones, addZone, removeZone } = useZones();
 
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawMode, setDrawMode] = useState(false);
-  const [zoneType, setZoneType] = useState("intrusion");
+  const [zoneType, setZoneType] = useState<ZoneTypeValue>("intrusion");
   const drawRef = useRef<Rect | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);
+  const clearSignalRef = useRef<number | undefined>(clearSignal);
 
   const dragRef = useRef<DragState | null>(null);
   const [, forceUpdate] = useState(0);
@@ -184,6 +203,20 @@ const ZoneEditor: React.FC = () => {
       window.removeEventListener("resize", syncViewport);
     };
   }, [syncViewport]);
+
+  useEffect(() => {
+    if (typeof drawModeExternal !== "boolean") return;
+    setDrawMode(drawModeExternal);
+  }, [drawModeExternal]);
+
+  useEffect(() => {
+    if (!zoneTypeExternal) return;
+    setZoneType(zoneTypeExternal);
+  }, [zoneTypeExternal]);
+
+  useEffect(() => {
+    onDrawModeChange?.(drawMode);
+  }, [drawMode, onDrawModeChange]);
 
   const pointerToNormalized = useCallback((e: React.MouseEvent): PointerSample | null => {
     const container = containerRef.current;
@@ -356,20 +389,36 @@ const ZoneEditor: React.FC = () => {
     zones.forEach((z) => removeZone(z.id));
   }, [zones, removeZone]);
 
+  useEffect(() => {
+    if (typeof clearSignal !== "number") return;
+
+    if (clearSignalRef.current === undefined) {
+      clearSignalRef.current = clearSignal;
+      return;
+    }
+
+    if (clearSignal !== clearSignalRef.current) {
+      clearSignalRef.current = clearSignal;
+      handleClearAll();
+    }
+  }, [clearSignal, handleClearAll]);
+
   const getZoneStyle = (type: string): ZoneStyle => ZONE_STYLES[type] ?? DEFAULT_STYLE;
   const previewStyle = getZoneStyle(zoneType);
   const cursorClass = drawMode ? "cursor-crosshair" : "cursor-default";
+
+  if (!visible) return null;
 
   return (
     <div
       ref={containerRef}
       className={`absolute inset-0 z-10 ${cursorClass}`}
-      style={{ pointerEvents: "none" }}
+      style={{ pointerEvents: "auto" }}
     >
       <div
         className="absolute"
         style={{
-          pointerEvents: drawMode || dragRef.current || zones.length > 0 ? "auto" : "none",
+          pointerEvents: "auto",
           left: viewport.offsetX,
           top: viewport.offsetY,
           width: viewport.width,
@@ -385,7 +434,7 @@ const ZoneEditor: React.FC = () => {
           return (
             <div
               key={zone.id}
-              className={`absolute group border-2 ${style.fillClass} ${style.borderClass}`}
+              className={`absolute group border-2 transition-shadow duration-200 hover:shadow-[0_0_12px_rgba(45,212,191,0.25)] ${style.fillClass} ${style.borderClass}`}
               style={{
                 left: `${zone.x * 100}%`,
                 top: `${zone.y * 100}%`,
@@ -446,40 +495,42 @@ const ZoneEditor: React.FC = () => {
         />
       </div>
 
-      <div
-        className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 rounded-xl bg-bg/80 backdrop-blur-lg border border-border shadow-lg z-30"
-        style={{ pointerEvents: "auto" }}
-      >
-        <button
-          onClick={() => setDrawMode((d) => !d)}
-          className={`px-3 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wider transition-colors ${
-            drawMode
-              ? "bg-accent text-bg"
-              : "bg-surface text-textSecondary hover:bg-card"
-          }`}
+      {showControls ? (
+        <div
+          className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 rounded-xl bg-bg/80 backdrop-blur-lg border border-border shadow-lg z-30"
+          style={{ pointerEvents: "auto" }}
         >
-          {drawMode ? "Drawing..." : "Draw Zone"}
-        </button>
-
-        <select
-          value={zoneType}
-          onChange={(e) => setZoneType(e.target.value)}
-          className="px-2 py-1.5 rounded-lg text-xs bg-surface text-textPrimary border border-border outline-none cursor-pointer appearance-none"
-        >
-          <option value="intrusion">Intrusion</option>
-          <option value="loitering">Loitering</option>
-          <option value="crowd">Crowd</option>
-        </select>
-
-        {zones.length > 0 && (
           <button
-            onClick={handleClearAll}
-            className="px-3 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wider bg-threat-critical/20 text-threat-critical hover:bg-threat-critical/30 transition-colors"
+            onClick={() => setDrawMode((d) => !d)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wider transition-colors ${
+              drawMode
+                ? "bg-accent text-bg"
+                : "bg-surface text-textSecondary hover:bg-card"
+            }`}
           >
-            Clear All
+            {drawMode ? "Drawing..." : "Draw Zone"}
           </button>
-        )}
-      </div>
+
+          <select
+            value={zoneType}
+            onChange={(e) => setZoneType(e.target.value as ZoneTypeValue)}
+            className="px-2 py-1.5 rounded-lg text-xs bg-surface text-textPrimary border border-border outline-none cursor-pointer appearance-none"
+          >
+            <option value="intrusion">Intrusion</option>
+            <option value="loitering">Loitering</option>
+            <option value="crowd">Crowd</option>
+          </select>
+
+          {zones.length > 0 && (
+            <button
+              onClick={handleClearAll}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wider bg-threat-critical/20 text-threat-critical hover:bg-threat-critical/30 transition-colors"
+            >
+              Clear All
+            </button>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 };

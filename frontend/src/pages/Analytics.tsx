@@ -127,6 +127,14 @@ export default function Analytics() {
     setPendingAlertsPath(path);
   };
 
+  const buildAlertsPath = ({ type = "all", sort = "timestamp" }: { type?: string; sort?: string } = {}) => {
+    const params = new URLSearchParams();
+    params.set("type", type);
+    params.set("range", timeRange);
+    params.set("sort", sort);
+    return `/alerts?${params.toString()}`;
+  };
+
   const { data: summaryData, error: summaryError } = useQuery({
     queryKey: ["summary", timeRange],
     queryFn: () => getSummary(timeRange),
@@ -242,19 +250,9 @@ export default function Analytics() {
         <SummaryCard title="Active Modules" value={activeModulesCount} icon={<BarChart3 size={18} />} />
       </div>
 
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={() => openAlertsWithFeedback("/alerts?sort=timestamp")}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            openAlertsWithFeedback("/alerts?sort=timestamp");
-          }
-        }}
-        className="panel-base rounded-lg p-4 cursor-pointer"
-      >
+      <div className="panel-base rounded-lg p-4">
           <h2 className="text-base font-semibold text-textPrimary">Alerts Over Time</h2>
-          <p className="text-xs text-textSecondary mb-3">Primary trend chart for decision-making</p>
+          <p className="text-xs text-textSecondary mb-3">Click chart points to investigate related alerts</p>
 
           {timeSeriesLoading ? (
             <div className="h-80 flex items-center justify-center text-sm text-textSecondary">Loading chart...</div>
@@ -273,6 +271,7 @@ export default function Analytics() {
                   activeDot={{ r: 6 }}
                   strokeWidth={2}
                   isAnimationActive
+                  onClick={() => openAlertsWithFeedback(buildAlertsPath({ type: "all", sort: "timestamp" }))}
                 />
               </LineChart>
             </ResponsiveContainer>
@@ -302,7 +301,7 @@ export default function Analytics() {
                   dataKey="value"
                   onClick={(entry) => {
                     if (entry && typeof entry.type === "string") {
-                      openAlertsWithFeedback(`/alerts?type=${entry.type}`);
+                      openAlertsWithFeedback(buildAlertsPath({ type: entry.type, sort: "timestamp" }));
                     }
                   }}
                 >
@@ -319,7 +318,7 @@ export default function Analytics() {
                   <button
                     key={entry.type}
                     type="button"
-                    onClick={() => openAlertsWithFeedback(`/alerts?type=${entry.type}`)}
+                    onClick={() => openAlertsWithFeedback(buildAlertsPath({ type: entry.type, sort: "timestamp" }))}
                     className="w-full flex items-center justify-between p-2 rounded-lg bg-surface border border-border text-left"
                   >
                     <span className="flex items-center gap-2 text-sm text-textPrimary">
@@ -359,7 +358,7 @@ export default function Analytics() {
                   <button
                     key={level}
                     type="button"
-                    onClick={() => openAlertsWithFeedback("/alerts?sort=threat_score")}
+                    onClick={() => openAlertsWithFeedback(buildAlertsPath({ type: "all", sort: "threat_score" }))}
                     className="w-full text-left space-y-1"
                   >
                     <div className="flex items-center justify-between text-xs">

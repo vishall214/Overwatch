@@ -4,24 +4,25 @@ export default {
   theme: {
     extend: {
       colors: {
-        bg: "#0B0F14",
-        surface: "#121821",
-        card: "#1A2230",
-        border: "#2A3441",
+        bg: "#071219",
+        surface: "#0d1a24",
+        card: "#112332",
+        border: "#1f3b4b",
 
-        textPrimary: "#E6EDF3",
-        textSecondary: "#9AA4B2",
-        textMuted: "#6B7280",
+        textPrimary: "#e7f7f8",
+        textSecondary: "#a7c7ce",
+        textMuted: "#6f98a0",
 
-        accent: "#249E94",
-        accentDeep: "#0C7779",
+        accent: "#14b8a6",
+        accentCyan: "#22d3ee",
+        accentDeep: "#0f766e",
 
         threat: {
-          critical: "#e74c3c",
-          high: "#f39c12",
-          medium: "#f1c40f",
-          low: "#2ecc71",
-          info: "#3498db"
+          critical: "#ef4444",
+          high: "#f97316",
+          medium: "#facc15",
+          low: "#22c55e",
+          info: "#38bdf8"
         },
       },
     },

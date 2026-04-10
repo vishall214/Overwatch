@@ -2,20 +2,20 @@ import { useState } from "react";
 import { BrowserRouter, Navigate, Routes, Route, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider, useAuth } from "./context/AuthContext";
-import Sidebar from "./components/Sidebar";
-import Topbar from "./components/Topbar";
+import Sidebar from "./components/Sidebar.tsx";
+import Topbar from "./components/Topbar.tsx";
 
-import Landing from "./pages/Landing.tsx";
+import Landing from "./pages/Landing";
 import Monitor from "./pages/Monitor.tsx";
-import Intrusion from "./pages/Intrusion";
-import Loitering from "./pages/Loitering";
-import Crowd from "./pages/Crowd";
-import Weapons from "./pages/Weapons";
-import Alerts from "./pages/Alerts";
-import Analytics from "./pages/Analytics";
+import Intrusion from "./pages/Intrusion.tsx";
+import Loitering from "./pages/Loitering.tsx";
+import Crowd from "./pages/Crowd.tsx";
+import Weapons from "./pages/Weapons.tsx";
+import Alerts from "./pages/Alerts.tsx";
+import Analytics from "./pages/Analytics.tsx";
 import Reports from "./pages/Reports.tsx";
-import Login from "./pages/Login";
-import Signup from "./pages/Signup";
+import Login from "./pages/Login.tsx";
+import Signup from "./pages/Signup.tsx";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -27,7 +27,7 @@ const queryClient = new QueryClient({
   },
 });
 
-import { CameraStreamProvider } from "./context/CameraStreamContext";
+import { CameraStreamProvider } from "./context/CameraStreamContext.tsx";
 
 function ProtectedRoute({ children }: { children: JSX.Element }) {
   const { isAuthenticated } = useAuth();
@@ -50,8 +50,12 @@ function AppLayout() {
       {showShell && <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed((c) => !c)} />}
       {showShell && <Topbar collapsed={sidebarCollapsed} />}
       <main
-        className={showShell ? "mt-14 p-5 min-h-[calc(100vh-56px)] transition-all duration-300 app-shell-bg text-textPrimary" : "min-h-screen app-shell-bg text-textPrimary"}
-        style={showShell ? { marginLeft: sidebarCollapsed ? 68 : 220 } : undefined}
+        className={
+          showShell
+            ? "mt-14 p-5 min-h-[calc(100vh-56px)] page-transition app-shell-bg text-textPrimary"
+            : "min-h-screen page-transition app-shell-bg text-textPrimary"
+        }
+        style={showShell ? { marginLeft: sidebarCollapsed ? 72 : 226 } : undefined}
       >
         <Routes>
           <Route path="/" element={<Landing />} />

@@ -130,12 +130,14 @@ function SnapshotThumb({ src }: { src: string | null }) {
 export function AlertCard({
   alert,
   compact = false,
+  minimal = false,
   selected = false,
   showSnapshot = true,
   onClick,
 }: {
   alert: AlertItem;
   compact?: boolean;
+  minimal?: boolean;
   selected?: boolean;
   showSnapshot?: boolean;
   onClick?: (alertId: number | string) => void;
@@ -149,7 +151,7 @@ export function AlertCard({
     <button
       type="button"
       onClick={() => onClick?.(model.id)}
-      className={`alert-card w-full text-left rounded-xl p-3 border border-border transition-all hover:bg-card flex items-start gap-3 ${severityClass} ${
+      className={`alert-card w-full text-left rounded-xl p-3 border border-border transition-all duration-200 hover:bg-card hover:scale-[1.01] hover:shadow-lg hover:shadow-teal-500/10 flex items-start gap-3 ${severityClass} ${
         selected ? "ring-2 ring-teal-400/60 scale-[1.01]" : ""
       }`}
     >
@@ -171,8 +173,8 @@ export function AlertCard({
           </span>
         </div>
         <p className="text-xs text-textSecondary mt-1">{model.timeText}</p>
-        <p className={`text-xs text-textMuted mt-1 ${compact ? "truncate" : ""}`}>{model.contextText}</p>
-        <p className="text-xs text-textMuted mt-1">Threat {model.threatScore}</p>
+        <p className={`text-xs text-textMuted mt-1 ${compact || minimal ? "truncate" : ""}`}>{model.contextText}</p>
+        {!minimal ? <p className="text-xs text-textMuted mt-1">Threat {model.threatScore}</p> : null}
       </div>
     </button>
   );

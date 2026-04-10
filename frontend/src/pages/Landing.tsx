@@ -1,359 +1,183 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import gsap from "gsap";
-import { ScrollTrigger } from "gsap/ScrollTrigger";
-import { Eye, Shield, Brain, Cpu, Activity, ChevronRight, Radar, Lock } from "lucide-react";
-import { colors } from "../theme/colors";
+import { ArrowRight, Camera, ChevronDown, SearchCheck, ShieldAlert, Sparkles } from "lucide-react";
 
-gsap.registerPlugin(ScrollTrigger);
-
-const features = [
+const capabilities = [
   {
-    icon: Shield,
-    title: "Intrusion Detection",
-    desc: "AI-powered zone breach detection with instant alerts and snapshot capture.",
-    color: "from-threat-critical to-threat-high",
+    icon: ShieldAlert,
+    title: "Detection",
+    description: "Continuously identifies suspicious behavior and zone violations as they happen.",
   },
   {
-    icon: Eye,
-    title: "Loitering Analysis",
-    desc: "Behavioral analysis identifies individuals lingering in restricted areas.",
-    color: "from-threat-high to-threat-medium",
+    icon: Sparkles,
+    title: "Intelligence",
+    description: "Converts alert streams into clear risk context and operator-ready insights.",
   },
   {
-    icon: Radar,
-    title: "Crowd Monitoring",
-    desc: "Real-time crowd density estimation with configurable thresholds.",
-    color: "from-threat-info to-accent",
-  },
-  {
-    icon: Brain,
-    title: "Deep Learning Pipeline",
-    desc: "YOLOv8-based inference with multi-stage asynchronous processing.",
-    color: "from-accent to-threat-info",
-  },
-  {
-    icon: Lock,
-    title: "Face Recognition",
-    desc: "Real-time face matching against registered identity database.",
-    color: "from-accent to-threat-low",
-  },
-  {
-    icon: Activity,
-    title: "Live Analytics",
-    desc: "Real-time dashboards with alert statistics and pipeline metrics.",
-    color: "from-textSecondary to-accent",
+    icon: SearchCheck,
+    title: "Investigation",
+    description: "Links related events, timelines, and evidence for fast decision making.",
   },
 ];
 
-const techStack = [
-  { name: "YOLOv8", detail: "Object Detection" },
-  { name: "FastAPI", detail: "Backend Runtime" },
-  { name: "DeepSORT", detail: "Multi-Object Tracking" },
-  { name: "InsightFace", detail: "Face Recognition" },
-  { name: "React", detail: "Dashboard UI" },
-  { name: "SQLite", detail: "Alert Storage" },
-];
+const flow = ["Camera", "Detection", "Alerts", "Investigation"];
 
 export default function Landing() {
-  const heroRef = useRef<HTMLDivElement>(null);
-  const featuresRef = useRef<HTMLDivElement>(null);
-  const techRef = useRef<HTMLDivElement>(null);
-  const ctaRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const capabilitiesRef = useRef<HTMLElement | null>(null);
+  const [scrollY, setScrollY] = useState(0);
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    let raf: number;
-    const particles: { x: number; y: number; vx: number; vy: number; r: number; a: number }[] = [];
-    const COUNT = 50;
-
-    const resize = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-    };
-
-    resize();
-    window.addEventListener("resize", resize);
-
-    for (let i = 0; i < COUNT; i++) {
-      particles.push({
-        x: Math.random() * canvas.width,
-        y: Math.random() * canvas.height,
-        vx: (Math.random() - 0.5) * 0.3,
-        vy: (Math.random() - 0.5) * 0.3,
-        r: Math.random() * 1.5 + 0.5,
-        a: Math.random() * 0.25 + 0.05,
-      });
-    }
-
-    const draw = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      for (const p of particles) {
-        p.x += p.vx;
-        p.y += p.vy;
-        if (p.x < 0) p.x = canvas.width;
-        if (p.x > canvas.width) p.x = 0;
-        if (p.y < 0) p.y = canvas.height;
-        if (p.y > canvas.height) p.y = 0;
-
-        ctx.globalAlpha = p.a;
-        ctx.fillStyle = colors.accent;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.globalAlpha = 1;
-      raf = requestAnimationFrame(draw);
-    };
-
-    raf = requestAnimationFrame(draw);
-
-    return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener("resize", resize);
-    };
+    const onScroll = () => setScrollY(window.scrollY);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
   useEffect(() => {
-    const gsapContext = gsap.context(() => {
-      const heroTl = gsap.timeline();
-      heroTl
-        .fromTo(".hero-badge", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" })
-        .fromTo(".hero-title", { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: 0.8, ease: "power3.out" }, "-=0.3")
-        .fromTo(".hero-subtitle", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" }, "-=0.4")
-        .fromTo(".hero-cta", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.5, ease: "power3.out" }, "-=0.3")
-        .fromTo(".hero-visual", { opacity: 0, scale: 0.9 }, { opacity: 1, scale: 1, duration: 1, ease: "power2.out" }, "-=0.5");
-
-      gsap.utils.toArray<HTMLElement>(".feature-card").forEach((card, i) => {
-        gsap.fromTo(
-          card,
-          { opacity: 0, y: 60 },
-          {
-            opacity: 1,
-            y: 0,
-            duration: 0.6,
-            delay: i * 0.1,
-            ease: "power3.out",
-            scrollTrigger: {
-              trigger: card,
-              start: "top 85%",
-              toggleActions: "play none none none",
-            },
+    const revealTargets = Array.from(document.querySelectorAll<HTMLElement>("[data-reveal]"));
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("is-visible");
           }
-        );
-      });
+        });
+      },
+      { threshold: 0.18 }
+    );
 
-      gsap.fromTo(
-        ".tech-card",
-        { opacity: 0, y: 40 },
-        {
-          opacity: 1,
-          y: 0,
-          duration: 0.5,
-          stagger: 0.08,
-          ease: "power3.out",
-          scrollTrigger: {
-            trigger: techRef.current,
-            start: "top 80%",
-            toggleActions: "play none none none",
-          },
-        }
-      );
+    revealTargets.forEach((target) => observer.observe(target));
 
-      gsap.fromTo(
-        ctaRef.current,
-        { opacity: 0, y: 40 },
-        {
-          opacity: 1,
-          y: 0,
-          duration: 0.8,
-          ease: "power3.out",
-          scrollTrigger: {
-            trigger: ctaRef.current,
-            start: "top 85%",
-            toggleActions: "play none none none",
-          },
-        }
-      );
-    });
-
-    return () => gsapContext.revert();
+    return () => observer.disconnect();
   }, []);
+
+  const scrollToCapabilities = () => {
+    capabilitiesRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   return (
-    <div className="min-h-screen bg-bg overflow-x-hidden">
-      <canvas ref={canvasRef} className="fixed inset-0 pointer-events-none z-0" />
+    <div className="relative min-h-screen overflow-x-hidden app-shell-bg page-transition">
+      <div
+        className="pointer-events-none absolute inset-0 hero-gradient opacity-80"
+        style={{ transform: `translateY(${scrollY * 0.08}px)` }}
+      />
+      <div
+        className="pointer-events-none absolute -top-24 left-1/3 h-[30rem] w-[30rem] rounded-full bg-accent/20 blur-[140px]"
+        style={{ transform: `translateY(${scrollY * 0.14}px)` }}
+      />
+      <div
+        className="pointer-events-none absolute bottom-10 right-1/4 h-[24rem] w-[24rem] rounded-full bg-accentCyan/20 blur-[120px]"
+        style={{ transform: `translateY(${scrollY * 0.1}px)` }}
+      />
 
-      <div className="fixed inset-0 pointer-events-none z-0">
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-accent/10 rounded-full blur-[120px]" />
-        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-threat-info/10 rounded-full blur-[120px]" />
-      </div>
+      <header className="relative z-10 mx-auto flex w-full max-w-7xl items-center justify-between px-6 py-5 md:px-8">
+        <Link to="/" className="flex items-center gap-3">
+          <span className="flex h-10 w-10 items-center justify-center rounded-xl glass-card">
+            <Camera className="h-5 w-5 text-accent" />
+          </span>
+          <span className="text-lg font-semibold tracking-[0.2em] text-textPrimary">OVERWATCH</span>
+        </Link>
 
-      <nav className="relative z-20 flex items-center justify-between px-8 py-5 max-w-7xl mx-auto">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-accent flex items-center justify-center">
-            <Eye className="w-5 h-5 text-bg" />
-          </div>
-          <span className="text-xl font-bold tracking-widest text-accent">OVERWATCH</span>
-        </div>
-        <div className="flex items-center gap-3">
-          <Link
-            to="/login"
-            className="px-4 py-2 text-sm text-textSecondary hover:text-textPrimary transition-colors"
-          >
-            Sign In
-          </Link>
-          <Link
-            to="/signup"
-            className="px-4 py-2 rounded-xl border border-border text-sm font-semibold text-accent hover:bg-card transition-colors"
-          >
-            Signup
-          </Link>
-          <Link
-            to="/dashboard"
-            className="px-5 py-2 rounded-xl bg-accent text-sm font-semibold text-bg hover:bg-accent/90 transition-colors"
-          >
-            Open Dashboard
-          </Link>
-        </div>
-      </nav>
+        <Link to="/login" className="btn-secondary !px-4 !py-2">
+          Sign In
+        </Link>
+      </header>
 
-      <section ref={heroRef} className="relative z-10 max-w-7xl mx-auto px-8 pt-20 pb-32">
-        <div className="text-center max-w-4xl mx-auto">
-          <div className="hero-badge inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-accent/10 border border-accent/30 mb-8">
-            <Cpu className="w-3.5 h-3.5 text-accent" />
-            <span className="text-xs font-semibold text-accent uppercase tracking-wide">AI Vision Monitoring</span>
+      <section className="relative z-10 flex min-h-[calc(100vh-72px)] items-center justify-center px-6 pb-14 pt-8 md:px-8">
+        <div className="max-w-4xl text-center">
+          <div data-reveal className="reveal-block inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/5 px-4 py-1.5 text-xs uppercase tracking-[0.18em] text-accentCyan">
+            <Sparkles className="h-3.5 w-3.5" />
+            AI Surveillance Platform
           </div>
 
-          <h1 className="hero-title text-6xl md:text-7xl font-black leading-tight mb-6">
-            <span className="text-textPrimary">An AI Powered</span>
-            <br />
-            <span className="bg-gradient-to-r from-accent via-threat-info to-accent bg-clip-text text-transparent">
-              Surveillance and Monitoring System
-            </span>
+          <h1 data-reveal className="reveal-block mt-6 text-4xl font-extrabold leading-tight text-textPrimary sm:text-5xl md:text-6xl">
+            Real-Time AI Surveillance Intelligence
           </h1>
 
-          <p className="hero-subtitle text-lg text-textSecondary max-w-2xl mx-auto mb-10 leading-relaxed">
-            Real-time threat detection, behavioral analysis, and intelligent monitoring
-            for modern environments.
+          <p data-reveal className="reveal-block mx-auto mt-5 max-w-2xl text-base text-textSecondary md:text-lg">
+            Detect, analyze, and respond to threats in real time.
           </p>
 
-          <div className="hero-cta flex items-center justify-center gap-4">
-            <Link
-              to="/dashboard"
-              className="group px-8 py-3.5 rounded-xl bg-accent text-sm font-semibold text-bg hover:bg-accent/90 transition-colors flex items-center gap-2"
-            >
-              Open Dashboard
-              <ChevronRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+          <div data-reveal className="reveal-block mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
+            <Link to="/monitor" className="btn-primary min-w-[176px]">
+              Enter System
+              <ArrowRight className="h-4 w-4" />
             </Link>
-            <Link
-              to="/signup"
-              className="px-8 py-3.5 rounded-xl border border-border text-sm font-semibold text-textPrimary hover:bg-card transition-colors"
-            >
-              Signup
-            </Link>
+            <button type="button" onClick={scrollToCapabilities} className="btn-secondary min-w-[176px]">
+              View Demo
+            </button>
           </div>
-        </div>
 
-        <div className="hero-visual mt-20 panel-base rounded-3xl p-6 max-w-5xl mx-auto">
-          <div className="grid grid-cols-3 gap-4">
-            <div className="col-span-2 h-64 rounded-2xl border border-border bg-surface flex items-center justify-center">
-              <div className="text-center">
-                <Eye className="w-12 h-12 text-accent/30 mx-auto mb-3" />
-                <p className="text-sm text-textSecondary">Live Camera Feed</p>
-              </div>
-            </div>
-            <div className="space-y-4">
-              <div className="h-[120px] card-base">
-                <div className="text-xs text-textMuted uppercase tracking-wider mb-2">Alerts</div>
-                <div className="space-y-2">
-                  {[1, 2, 3].map((i) => (
-                    <div key={i} className="h-4 rounded bg-surface" />
-                  ))}
-                </div>
-              </div>
-              <div className="h-[120px] card-base">
-                <div className="text-xs text-textMuted uppercase tracking-wider mb-2">Status</div>
-                <div className="space-y-2">
-                  {[1, 2, 3].map((i) => (
-                    <div key={i} className="h-4 rounded bg-surface" />
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section ref={featuresRef} className="relative z-10 max-w-7xl mx-auto px-8 py-24">
-        <div className="text-center mb-16">
-          <h2 className="text-3xl font-bold text-textPrimary mb-4">Detection Capabilities</h2>
-          <p className="text-textSecondary max-w-xl mx-auto">
-            Multi-modal threat detection powered by state-of-the-art deep learning models.
-          </p>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {features.map((f) => (
-            <div
-              key={f.title}
-              className="feature-card group panel-base rounded-2xl p-6 hover:bg-card transition-colors duration-300 cursor-default"
-            >
-              <div
-                className={`w-10 h-10 rounded-xl bg-gradient-to-br ${f.color} flex items-center justify-center mb-4 group-hover:scale-105 transition-transform`}
-              >
-                <f.icon className="w-5 h-5 text-bg" />
-              </div>
-              <h3 className="text-lg font-semibold text-textPrimary mb-2">{f.title}</h3>
-              <p className="text-sm text-textSecondary leading-relaxed">{f.desc}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section ref={techRef} className="relative z-10 max-w-7xl mx-auto px-8 py-24">
-        <div className="text-center mb-16">
-          <h2 className="text-3xl font-bold text-textPrimary mb-4">Technology Stack</h2>
-          <p className="text-textSecondary max-w-xl mx-auto">
-            Built on proven, production-grade frameworks and models.
-          </p>
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-          {techStack.map((t) => (
-            <div
-              key={t.name}
-              className="tech-card text-center card-base hover:bg-surface transition-colors duration-200"
-            >
-              <div className="text-sm font-semibold text-textPrimary mb-1">{t.name}</div>
-              <div className="text-xs text-textSecondary">{t.detail}</div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section ref={ctaRef} className="relative z-10 max-w-4xl mx-auto px-8 py-24 text-center">
-        <div className="rounded-3xl bg-gradient-to-br from-accent/10 to-threat-info/10 border border-border p-12">
-          <h2 className="text-3xl font-bold text-textPrimary mb-4">Ready to Monitor?</h2>
-          <p className="text-textSecondary mb-8 max-w-lg mx-auto">
-            Access the live dashboard, configure detection modules, and start protecting your environment.
-          </p>
-          <Link
-            to="/dashboard"
-            className="inline-flex items-center gap-2 px-8 py-3.5 rounded-xl bg-accent text-sm font-semibold text-bg hover:bg-accent/90 transition-colors"
+          <button
+            type="button"
+            onClick={scrollToCapabilities}
+            className="mt-12 inline-flex items-center gap-2 text-xs uppercase tracking-[0.16em] text-textMuted transition-all duration-300 ease-out hover:text-textPrimary"
           >
-            Launch Dashboard
-            <ChevronRight className="w-4 h-4" />
+            Scroll to explore
+            <ChevronDown className="h-4 w-4" />
+          </button>
+        </div>
+      </section>
+
+      <section ref={capabilitiesRef} className="relative z-10 mx-auto w-full max-w-6xl px-6 py-20 md:px-8" data-reveal>
+        <div className="reveal-block is-visible text-center">
+          <p className="text-xs uppercase tracking-[0.18em] text-accentCyan">Capabilities</p>
+          <h2 className="mt-2 text-3xl font-bold text-textPrimary">Built for fast operational clarity</h2>
+        </div>
+
+        <div className="mt-10 grid gap-5 md:grid-cols-3">
+          {capabilities.map((item, index) => (
+            <article
+              key={item.title}
+              data-reveal
+              className="reveal-block glass-card p-5 transition-all duration-300 ease-out hover:scale-[1.02]"
+              style={{ transitionDelay: `${index * 90}ms` }}
+            >
+              <span className="mb-4 inline-flex h-11 w-11 items-center justify-center rounded-xl bg-accent/20 text-accentCyan">
+                <item.icon className="h-5 w-5" />
+              </span>
+              <h3 className="text-lg font-semibold text-textPrimary">{item.title}</h3>
+              <p className="mt-2 text-sm text-textSecondary">{item.description}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="relative z-10 mx-auto w-full max-w-6xl px-6 py-20 md:px-8" data-reveal>
+        <div className="reveal-block text-center">
+          <p className="text-xs uppercase tracking-[0.18em] text-accentCyan">System Flow</p>
+          <h2 className="mt-2 text-3xl font-bold text-textPrimary">Camera to investigation in one connected path</h2>
+        </div>
+
+        <div className="mt-10 grid gap-3 md:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr]">
+          {flow.map((step, index) => (
+            <div key={step} className="contents">
+              <div
+                data-reveal
+                className="reveal-block glass-card p-4 text-center transition-all duration-300 ease-out hover:scale-[1.02]"
+                style={{ transitionDelay: `${index * 90}ms` }}
+              >
+                <p className="text-sm font-semibold text-textPrimary">{step}</p>
+              </div>
+              {index < flow.length - 1 ? (
+                <div className="hidden items-center justify-center text-accentCyan md:flex">
+                  <ArrowRight className="h-4 w-4" />
+                </div>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="relative z-10 mx-auto flex w-full max-w-4xl justify-center px-6 py-24 md:px-8" data-reveal>
+        <div className="reveal-block glass-card w-full p-8 text-center">
+          <h2 className="text-2xl font-bold text-textPrimary">Ready to secure your environment?</h2>
+          <p className="mt-2 text-sm text-textSecondary">Start monitoring with a single, unified operator workflow.</p>
+          <Link to="/monitor" className="btn-primary mt-7">
+            Start Monitoring
+            <ArrowRight className="h-4 w-4" />
           </Link>
         </div>
       </section>
-
-      <footer className="relative z-10 py-8 text-center">
-        <p className="text-xs text-textMuted font-mono">OVERWATCH Surveillance System - v2.0</p>
-      </footer>
     </div>
   );
 }

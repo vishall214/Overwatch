@@ -1,69 +1,110 @@
+@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+
+  body {
+    @apply text-textPrimary;
+    background: radial-gradient(circle at 15% 0%, rgba(20, 184, 166, 0.14), transparent 35%),
+      radial-gradient(circle at 85% 100%, rgba(34, 211, 238, 0.12), transparent 38%),
+      #071219;
+    font-family: "Outfit", "Segoe UI", sans-serif;
+  }
+}
+
 @layer components {
-  .glass {
+  .glass-card,
+  .glass,
+  .panel-base,
+  .card-base {
     background: rgba(255, 255, 255, 0.05);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-  }
-
-  .glass-strong {
-    background: rgba(255, 255, 255, 0.08);
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-  }
-
-  .glass-hover {
-    transition: all 0.25s ease;
-  }
-
-  .glass-hover:hover {
-    background: rgba(255, 255, 255, 0.1);
-    border-color: rgba(36, 158, 148, 0.4);
-  }
-
-  .panel-base {
-    @apply rounded-xl;
-    background: rgba(255, 255, 255, 0.05);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 0 30px rgba(20, 184, 166, 0.1);
+    border-radius: 0.9rem;
   }
 
   .card-base {
-    @apply rounded-xl p-3;
-    background: rgba(255, 255, 255, 0.05);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    @apply p-4;
   }
 
   .app-shell-bg {
-    background: radial-gradient(
-      circle at top left,
-      rgba(36, 158, 148, 0.08),
-      transparent 40%
-    ),
-    #05070a;
+    background: radial-gradient(circle at 0% 0%, rgba(20, 184, 166, 0.16), transparent 38%),
+      radial-gradient(circle at 100% 100%, rgba(34, 211, 238, 0.14), transparent 42%),
+      #071219;
+  }
+
+  .page-transition {
+    transition: all 300ms ease-out;
+  }
+
+  .reveal-block {
+    opacity: 0;
+    transform: translateY(16px);
+    transition: all 600ms ease-out;
+  }
+
+  .reveal-block.is-visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .hero-gradient {
+    background: linear-gradient(120deg, rgba(20, 184, 166, 0.14), rgba(34, 211, 238, 0.1), rgba(20, 184, 166, 0.08));
+    background-size: 200% 200%;
+    animation: hero-gradient-shift 12s ease infinite;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-6 py-3 text-sm font-semibold text-bg;
+    background: linear-gradient(120deg, #14b8a6, #22d3ee);
+    transition: all 300ms ease-out;
+  }
+
+  .btn-primary:hover {
+    transform: scale(1.02);
+    box-shadow: 0 0 24px rgba(34, 211, 238, 0.35);
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-6 py-3 text-sm font-semibold;
+    @apply glass-card text-textPrimary;
+    transition: all 300ms ease-out;
+  }
+
+  .btn-secondary:hover {
+    transform: scale(1.02);
+    box-shadow: 0 0 20px rgba(20, 184, 166, 0.2);
+  }
+}
+
+@keyframes hero-gradient-shift {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
   }
 }
 
 .recharts-tooltip-wrapper {
   outline: none !important;
-}
-
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-body {
-  @apply text-textPrimary;
-  background: #05070a;
-  font-family: system-ui, -apple-system, Segoe UI, sans-serif;
 }

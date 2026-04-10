@@ -1,25 +1,40 @@
-import React, { useRef, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { switchSource, listDemoVideos, uploadVideo, deleteUploadedVideo } from "../api/video";
 import { AlertCircle, Check, Loader, Trash2, Upload, Video } from "lucide-react";
 
-type SourceModule = "intrusion" | "loitering" | "crowd" | "weapon_detection";
+type SourceModule = "intrusion" | "loitering" | "crowd" | "weapon_detection" | "weapons";
 type ApiModule = "intrusion" | "loitering" | "crowd";
+type DemoCategory = "intrusion" | "loitering" | "crowd";
 
 interface SourceSelectorProps {
   moduleType: SourceModule;
   onSourceChanged?: () => void;
 }
 
-function resolveApiModule(moduleType: SourceModule): ApiModule {
-  if (moduleType === "weapon_detection") return "intrusion";
-  return moduleType;
-}
+const moduleToApiModuleMap: Record<SourceModule, ApiModule> = {
+  intrusion: "intrusion",
+  loitering: "loitering",
+  crowd: "crowd",
+  weapon_detection: "intrusion",
+  weapons: "intrusion",
+};
 
-function resolveDemoCategory(moduleType: SourceModule): "intrusion" | "loitering" | "crowd" {
-  if (moduleType === "weapon_detection") return "intrusion";
-  return moduleType;
-}
+const moduleToCategoryMap: Record<SourceModule, DemoCategory> = {
+  intrusion: "intrusion",
+  loitering: "loitering",
+  crowd: "crowd",
+  weapon_detection: "intrusion",
+  weapons: "intrusion",
+};
+
+const moduleToFilenameHintMap: Record<SourceModule, string> = {
+  intrusion: "intrusion",
+  loitering: "loitering",
+  crowd: "crowd",
+  weapon_detection: "weapon",
+  weapons: "weapon",
+};
 
 function formatDemoName(filename: string): string {
   return filename.replace(/\.[^/.]+$/, "").replace(/[_-]+/g, " ").trim();
@@ -33,14 +48,20 @@ export default function SourceSelector({ moduleType, onSourceChanged }: SourceSe
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
-  const apiModule = resolveApiModule(moduleType);
-  const demoCategory = resolveDemoCategory(moduleType);
+  const apiModule = moduleToApiModuleMap[moduleType];
+  const demoCategory = moduleToCategoryMap[moduleType];
+  const demoFilenameHint = moduleToFilenameHintMap[moduleType].toLowerCase();
 
   const { data: demoList, isLoading: demoLoading } = useQuery({
     queryKey: ["demoVideos", demoCategory],
     queryFn: () => listDemoVideos(demoCategory),
     enabled: selectedMode === "demo",
   });
+
+  const filteredDemoVideos = useMemo(() => {
+    const videos = demoList?.videos ?? [];
+    return videos.filter((video) => video.toLowerCase().includes(demoFilenameHint));
+  }, [demoFilenameHint, demoList?.videos]);
 
   const switchMutation = useMutation({
     mutationFn: switchSource,
@@ -181,9 +202,9 @@ export default function SourceSelector({ moduleType, onSourceChanged }: SourceSe
               <div className="text-center py-3">
                 <Loader className="w-4 h-4 animate-spin inline text-textMuted" />
               </div>
-            ) : demoList?.videos.length ? (
+            ) : filteredDemoVideos.length ? (
               <div className="max-h-36 overflow-y-auto space-y-1">
-                {demoList.videos.map((video) => {
+                {filteredDemoVideos.map((video) => {
                   const isSelected = selectedDemo === video;
                   return (
                     <button
@@ -192,17 +213,17 @@ export default function SourceSelector({ moduleType, onSourceChanged }: SourceSe
                       onClick={() => void handleDemoSelect(video)}
                       className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
                         isSelected
-                          ? "bg-card border border-accent/40 text-textPrimary"
+                          ? "bg-teal-500/20 border border-teal-400 text-white"
                           : "bg-surface border border-border text-textSecondary hover:text-textPrimary"
                       }`}
                     >
-                      {formatDemoName(video)}
+                      [{` ${formatDemoName(video)} `}]
                     </button>
                   );
                 })}
               </div>
             ) : (
-              <p className="text-xs text-textSecondary">No demo videos available for {demoCategory}</p>
+              <p className="text-xs text-textSecondary">No demo videos available for {moduleType}</p>
             )}
 
             {loadedDemo ? (
