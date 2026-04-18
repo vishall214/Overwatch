@@ -1,7 +1,4 @@
-﻿version: "3.9"
-
-services:
-
+﻿services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
@@ -13,12 +10,67 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U overwatch -d overwatch"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg2://overwatch:overwatch@postgres:5432/overwatch
+      OVERWATCH_DEBUG: "false"
+      OVERWATCH_CORS_ORIGINS: '["http://localhost:3000","http://127.0.0.1:3000"]'
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/storage:/app/storage
+      - ./backend/uploads:/app/uploads
+      - ./backend/weights:/app/weights
+      - ./backend/assets:/app/assets:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
 
 volumes:
   postgres_data:

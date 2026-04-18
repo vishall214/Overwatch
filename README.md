@@ -3,12 +3,41 @@ AI/ML-Based Video Analysis and Interpretation System
 
 ## Quick Start
 
-### 1. Infrastructure
+### 1. Full Stack with Docker (Frontend + Backend + Postgres + Redis)
 ```
-docker compose up -d
+docker compose up --build
 ```
 
-### 2. Backend
+- Frontend: http://localhost:3000
+- Backend API: http://localhost:8000
+- Backend Docs: http://localhost:8000/docs
+
+Stop all services:
+```
+docker compose down
+```
+
+### 1.1 Publish Images to Docker Hub (to get shareable image links)
+```powershell
+docker login
+docker build -t <your-dockerhub-username>/backend:latest ./backend
+docker build -t <your-dockerhub-username>/frontend:latest ./frontend
+docker push <your-dockerhub-username>/backend:latest
+docker push <your-dockerhub-username>/frontend:latest
+```
+
+After push, your image pages are:
+- Backend: https://hub.docker.com/repository/docker/<your-dockerhub-username>/backend/general
+- Frontend: https://hub.docker.com/repository/docker/<your-dockerhub-username>/frontend/general
+
+### 2. Local Development (without Docker for app services)
+
+Start infra only:
+```
+docker compose up -d postgres redis
+```
+
+Backend:
 ```
 cd backend
 .venv\Scripts\Activate.ps1
@@ -19,10 +48,11 @@ uvicorn app.main:app --reload --port 8000
 API: http://localhost:8000
 Docs: http://localhost:8000/docs
 
-### 3. Frontend
+Frontend:
 ```
 cd frontend
-npm start
+npm install
+npm run dev
 ```
 App: http://localhost:3000
 
