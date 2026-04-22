@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Eye, Lock, Mail } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
@@ -8,14 +8,8 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitted, setSubmitted] = useState(false);
-  const { login, isAuthenticated } = useAuth();
+  const { login } = useAuth();
   const navigate = useNavigate();
-
-  useEffect(() => {
-    if (isAuthenticated) {
-      navigate("/dashboard", { replace: true });
-    }
-  }, [isAuthenticated, navigate]);
 
   const emailError = useMemo(() => {
     if (!submitted) return "";
@@ -39,7 +33,7 @@ export default function Login() {
 
     try {
       await login(email, password);
-      navigate("/dashboard", { replace: true });
+      navigate("/monitor", { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Invalid credentials");
     }

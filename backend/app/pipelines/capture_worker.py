@@ -89,6 +89,10 @@ class CaptureWorker:
             logger.warning("CaptureWorker already running")
             return
 
+        if self._thread is not None and self._thread.is_alive():
+            logger.warning("CaptureWorker thread still alive; refusing duplicate start")
+            return
+
         source_info = self._video_service.source_info
         configured_source = str(
             source_info.get("source", self._settings.video_source)
@@ -137,7 +141,10 @@ class CaptureWorker:
         self._source_manager.release()
         if self._thread is not None:
             self._thread.join(timeout=5.0)
-            self._thread = None
+            if self._thread.is_alive():
+                logger.warning("CaptureWorker thread did not stop within timeout")
+            else:
+                self._thread = None
         logger.info("CaptureWorker stopped (captured %d frames)", self._frame_count)
 
     def _capture_loop(self) -> None:
@@ -280,6 +287,8 @@ class CaptureWorker:
         info = self._source_manager.info
         info["is_capturing"] = self._is_running
         return info
+
+    @property
     def is_running(self) -> bool:
         """Return whether the capture worker is active."""
         return self._is_running

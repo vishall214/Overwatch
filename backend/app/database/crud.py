@@ -6,6 +6,7 @@ Functions for creating and querying alert records.
 
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+import heapq
 import logging
 from typing import Optional
 
@@ -341,9 +342,14 @@ def get_threat_metrics(
 
     cutoff = datetime.now(timezone.utc) - timedelta(hours=range_hours)
     rows = (
-        db.query(AlertRow)
+        db.query(
+            AlertRow.id,
+            AlertRow.event_type,
+            AlertRow.zone,
+            AlertRow.timestamp,
+            AlertRow.metadata_,
+        )
         .filter(AlertRow.timestamp >= cutoff)
-        .order_by(AlertRow.timestamp.desc())
         .all()
     )
 
@@ -376,14 +382,14 @@ def get_threat_metrics(
             1,
         )
 
-    peak_events = sorted(
+    peak_events = heapq.nlargest(
+        peak_limit,
         scored_events,
         key=lambda event: (
             int(event["threat_score"]),
             str(event["timestamp"]),
         ),
-        reverse=True,
-    )[:peak_limit]
+    )
 
     peak_score = peak_events[0]["threat_score"] if peak_events else 0
 

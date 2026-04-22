@@ -5,8 +5,9 @@ Pydantic schemas for video source switching, demo listing,
 and upload endpoints.
 """
 
+from typing import Literal, Optional
+
 from pydantic import BaseModel, Field
-from typing import Optional
 
 
 class SourceSwitchRequest(BaseModel):
@@ -28,15 +29,18 @@ class SourceSwitchRequest(BaseModel):
         default=None,
         description="Path to uploaded video (required for upload sources).",
     )
-    module: Optional[str] = Field(
+    module: Optional[
+        Literal["intrusion", "loitering", "crowd", "weapon_detection", "weapons"]
+    ] = Field(
         default=None,
-        description="Module initiating source switch (intrusion/loitering/crowd).",
+        description="Module initiating source switch.",
     )
 
 
 class SourceSwitchResponse(BaseModel):
     """Response for POST /video/source."""
 
+    success: bool = True
     message: str
     source_type: str
     source_name: str
@@ -52,6 +56,8 @@ class DemoListResponse(BaseModel):
 class UploadResponse(BaseModel):
     """Response for POST /video/upload."""
 
+    success: bool = True
     message: str
     filename: str
     path: str
+    size_mb: float

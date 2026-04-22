@@ -59,11 +59,16 @@ function ModuleToggle({
 
   useEffect(() => {
     if (!knobRef.current) return;
-    gsap.to(knobRef.current, {
+    const tween = gsap.to(knobRef.current, {
       x: enabled ? 20 : 0,
       duration: 0.3,
       ease: "power2.out",
+      overwrite: "auto",
     });
+
+    return () => {
+      tween.kill();
+    };
   }, [enabled]);
 
   return (

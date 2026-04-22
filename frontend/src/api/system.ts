@@ -1,4 +1,5 @@
 import { API } from "./config";
+import { getAuthHeaders } from "./auth";
 import type { ModulesState, SystemStatus, SystemMetrics } from "../types/system";
 
 export async function fetchModules(): Promise<ModulesState> {
@@ -8,13 +9,19 @@ export async function fetchModules(): Promise<ModulesState> {
 }
 
 export async function enableModule(name: string): Promise<{ module: string; enabled: boolean; modules: ModulesState }> {
-  const res = await fetch(API.system.moduleEnable(name), { method: "POST" });
+  const res = await fetch(API.system.moduleEnable(name), {
+    method: "POST",
+    headers: getAuthHeaders(),
+  });
   if (!res.ok) throw new Error(`Failed to enable ${name}`);
   return res.json();
 }
 
 export async function disableModule(name: string): Promise<{ module: string; enabled: boolean; modules: ModulesState }> {
-  const res = await fetch(API.system.moduleDisable(name), { method: "POST" });
+  const res = await fetch(API.system.moduleDisable(name), {
+    method: "POST",
+    headers: getAuthHeaders(),
+  });
   if (!res.ok) throw new Error(`Failed to disable ${name}`);
   return res.json();
 }

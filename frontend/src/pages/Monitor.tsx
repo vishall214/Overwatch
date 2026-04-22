@@ -19,7 +19,7 @@ const MODULE_TABS: ModuleTab[] = [
   { label: "Intrusion", module: "intrusion", queryValue: "intrusion" },
   { label: "Loitering", module: "loitering", queryValue: "loitering" },
   { label: "Crowd", module: "crowd", queryValue: "crowd" },
-  { label: "Weapons", module: "weapon_detection", queryValue: "weapons" },
+  { label: "Weapons", module: "weapon_detection", queryValue: "weapon_detection" },
 ];
 
 function parseModuleQuery(value: string | null): MonitorModule | null {
@@ -30,7 +30,6 @@ function parseModuleQuery(value: string | null): MonitorModule | null {
 }
 
 function toModuleQuery(module: MonitorModule): string {
-  if (module === "weapon_detection") return "weapons";
   return module;
 }
 

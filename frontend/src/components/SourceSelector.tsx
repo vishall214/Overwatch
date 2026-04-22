@@ -3,8 +3,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { switchSource, listDemoVideos, uploadVideo, deleteUploadedVideo } from "../api/video";
 import { AlertCircle, Check, Loader, Trash2, Upload, Video } from "lucide-react";
 
-type SourceModule = "intrusion" | "loitering" | "crowd" | "weapon_detection" | "weapons";
-type ApiModule = "intrusion" | "loitering" | "crowd";
+type SourceModule = "intrusion" | "loitering" | "crowd" | "weapon_detection";
 type DemoCategory = "intrusion" | "loitering" | "crowd";
 
 interface SourceSelectorProps {
@@ -12,20 +11,11 @@ interface SourceSelectorProps {
   onSourceChanged?: () => void;
 }
 
-const moduleToApiModuleMap: Record<SourceModule, ApiModule> = {
-  intrusion: "intrusion",
-  loitering: "loitering",
-  crowd: "crowd",
-  weapon_detection: "intrusion",
-  weapons: "intrusion",
-};
-
 const moduleToCategoryMap: Record<SourceModule, DemoCategory> = {
   intrusion: "intrusion",
   loitering: "loitering",
   crowd: "crowd",
   weapon_detection: "intrusion",
-  weapons: "intrusion",
 };
 
 const moduleToFilenameHintMap: Record<SourceModule, string> = {
@@ -33,7 +23,6 @@ const moduleToFilenameHintMap: Record<SourceModule, string> = {
   loitering: "loitering",
   crowd: "crowd",
   weapon_detection: "weapon",
-  weapons: "weapon",
 };
 
 function formatDemoName(filename: string): string {
@@ -48,7 +37,7 @@ export default function SourceSelector({ moduleType, onSourceChanged }: SourceSe
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
-  const apiModule = moduleToApiModuleMap[moduleType];
+  const apiModule = moduleType;
   const demoCategory = moduleToCategoryMap[moduleType];
   const demoFilenameHint = moduleToFilenameHintMap[moduleType].toLowerCase();
 

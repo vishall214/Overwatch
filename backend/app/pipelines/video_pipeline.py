@@ -16,6 +16,7 @@ through thread-safe queues.
 
 import asyncio
 import logging
+import queue
 from typing import Optional
 
 from app.config import Settings
@@ -124,13 +125,9 @@ class VideoPipeline:
 
         loop = asyncio.get_running_loop()
 
-        # ── Open video source (blocking I/O → executor) ───────
-        opened = await loop.run_in_executor(
-            None, self._video_service.start, source,
-        )
-        if not opened:
-            logger.error("Failed to open video source during pipeline start (source=%s)", resolved_source)
-            return False
+        # SourceManager (inside CaptureWorker) is the single owner of cv2.VideoCapture.
+        # VideoService now tracks selected source metadata only.
+        self._video_service.set_source(str(resolved_source))
 
         # ── Load detection model (blocking I/O → executor) ────
         if not self._detection_service.is_loaded:
@@ -139,7 +136,6 @@ class VideoPipeline:
             )
             if not loaded:
                 logger.error("Failed to load detection model during pipeline start")
-                self._video_service.stop()
                 return False
 
         # ── Load face recognition model (blocking I/O → executor) ──
@@ -197,6 +193,10 @@ class VideoPipeline:
 
         # ── Start workers (order matters) ───────────────────────
         self._capture_worker.start()
+        if not self._capture_worker.is_running:
+            logger.error("Failed to start capture worker (source=%s)", resolved_source)
+            return False
+
         self._inference_worker.start()
         self._tracking_worker.start()
         self._behavior_worker.start()
@@ -212,6 +212,27 @@ class VideoPipeline:
         logger.info("Video pipeline started (5 workers, source=%s)", resolved_source)
         return True
 
+    async def _wait_for_queue_drain(
+        self,
+        q: queue.Queue,
+        name: str,
+        timeout_seconds: float = 3.0,
+    ) -> None:
+        """Wait briefly for a queue to drain during staged shutdown."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + max(0.1, timeout_seconds)
+
+        while q.qsize() > 0 and loop.time() < deadline:
+            await asyncio.sleep(0.05)
+
+        remaining = q.qsize()
+        if remaining > 0:
+            logger.warning(
+                "Shutdown queue drain timeout for %s (remaining=%d)",
+                name,
+                remaining,
+            )
+
     async def stop(self) -> None:
         """
         Stop the pipeline and release all resources.
@@ -226,17 +247,26 @@ class VideoPipeline:
 
         loop = asyncio.get_running_loop()
 
-        # Stop workers in reverse order (thread.join → executor)
-        if self._stream_worker is not None:
-            await loop.run_in_executor(None, self._stream_worker.stop)
-        if self._behavior_worker is not None:
-            await loop.run_in_executor(None, self._behavior_worker.stop)
-        if self._tracking_worker is not None:
-            await loop.run_in_executor(None, self._tracking_worker.stop)
-        if self._inference_worker is not None:
-            await loop.run_in_executor(None, self._inference_worker.stop)
+        # Stage shutdown from producers to consumers:
+        # stop upstream producer, let downstream stage drain, then stop downstream.
         if self._capture_worker is not None:
             await loop.run_in_executor(None, self._capture_worker.stop)
+        await self._wait_for_queue_drain(self._queues.frame_queue, "frame_queue")
+
+        if self._inference_worker is not None:
+            await loop.run_in_executor(None, self._inference_worker.stop)
+        await self._wait_for_queue_drain(self._queues.detection_queue, "detection_queue")
+
+        if self._tracking_worker is not None:
+            await loop.run_in_executor(None, self._tracking_worker.stop)
+        await self._wait_for_queue_drain(self._queues.tracking_queue, "tracking_queue")
+
+        if self._behavior_worker is not None:
+            await loop.run_in_executor(None, self._behavior_worker.stop)
+        await self._wait_for_queue_drain(self._queues.behavior_queue, "behavior_queue")
+
+        if self._stream_worker is not None:
+            await loop.run_in_executor(None, self._stream_worker.stop)
 
         # Drain queues
         self._queues.clear_all()
@@ -355,6 +385,9 @@ class VideoPipeline:
             "frames_dropped": 0,
             "face_queue_depth": 0,
             "pending_face_tracks": 0,
+            "alert_queue_depth": 0,
+            "alerts_persisted": 0,
+            "alerts_dropped": 0,
         }
         stream_stats = {
             "is_running": False,
@@ -381,7 +414,7 @@ class VideoPipeline:
 
         return {
             "is_running": self._is_running,
-            "source": self._video_service.source_info,
+            "source": self.current_source_info,
             "detection": self._detection_service.model_info,
             "capture_worker": capture_stats,
             "inference_worker": inference_stats,

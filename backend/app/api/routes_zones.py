@@ -7,12 +7,13 @@ Endpoints for zone management (CRUD).
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.database.crud import create_zone, get_zones, delete_zone
 from app.database.database import SessionLocal
 from app.schemas.zone_schema import ZoneCreate, ZoneListResponse, ZoneResponse
 from app.services.zone_service import ZoneService
+from app.core.security import get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +70,7 @@ async def list_zones() -> ZoneListResponse:
 
 
 @router.post("", response_model=ZoneResponse, status_code=201)
-async def add_zone(payload: ZoneCreate) -> ZoneResponse:
+async def add_zone(payload: ZoneCreate, _: int = Depends(get_current_user)) -> ZoneResponse:
     """Create a new zone and reload cache."""
     service = _get_zone_service()
     logger.info("ZONE PAYLOAD: %s", payload.model_dump())
@@ -113,7 +114,7 @@ async def add_zone(payload: ZoneCreate) -> ZoneResponse:
 
 
 @router.delete("/{zone_id}")
-async def remove_zone(zone_id: int) -> dict:
+async def remove_zone(zone_id: int, _: int = Depends(get_current_user)) -> dict:
     """Delete a zone and reload cache."""
     service = _get_zone_service()
     db = SessionLocal()

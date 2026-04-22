@@ -1,18 +1,25 @@
 import { useQuery } from "@tanstack/react-query";
 import { fetchSystemStatus, fetchSystemMetrics } from "../api/system";
+import { getVisibleRefetchInterval, POLLING_INTERVAL_MS } from "./polling";
 
-export function useSystemStatus() {
+export function useSystemStatus(enabled = true) {
   return useQuery({
     queryKey: ["systemStatus"],
     queryFn: fetchSystemStatus,
-    refetchInterval: 2000,
+    enabled,
+    refetchInterval: () =>
+      enabled ? getVisibleRefetchInterval(POLLING_INTERVAL_MS.systemStatus) : false,
+    refetchOnWindowFocus: true,
   });
 }
 
-export function useSystemMetrics() {
+export function useSystemMetrics(enabled = true) {
   return useQuery({
     queryKey: ["systemMetrics"],
     queryFn: fetchSystemMetrics,
-    refetchInterval: 5000,
+    enabled,
+    refetchInterval: () =>
+      enabled ? getVisibleRefetchInterval(POLLING_INTERVAL_MS.systemMetrics) : false,
+    refetchOnWindowFocus: true,
   });
 }

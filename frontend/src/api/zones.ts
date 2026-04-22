@@ -1,4 +1,5 @@
 import { API } from "./config";
+import { getAuthHeaders } from "./auth";
 
 export interface Zone {
   id: number;
@@ -37,7 +38,10 @@ export async function fetchZones(): Promise<ZoneListResponse> {
 export async function createZone(payload: ZoneCreatePayload): Promise<Zone> {
   const res = await fetch(API.zones.create, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...getAuthHeaders(),
+    },
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error("Failed to create zone");
@@ -45,6 +49,9 @@ export async function createZone(payload: ZoneCreatePayload): Promise<Zone> {
 }
 
 export async function deleteZone(id: number): Promise<void> {
-  const res = await fetch(API.zones.delete(id), { method: "DELETE" });
+  const res = await fetch(API.zones.delete(id), {
+    method: "DELETE",
+    headers: getAuthHeaders(),
+  });
   if (!res.ok) throw new Error("Failed to delete zone");
 }

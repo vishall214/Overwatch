@@ -20,6 +20,13 @@ export function normalizeThreatLevel(level: unknown): ThreatLevel {
   return "LOW";
 }
 
+function threatLevelFromScore(score: number): ThreatLevel {
+  if (score >= 76) return "CRITICAL";
+  if (score >= 51) return "HIGH";
+  if (score >= 26) return "MEDIUM";
+  return "LOW";
+}
+
 export function resolveThreatInfo(alert: {
   threat_score?: unknown;
   threat_level?: unknown;
@@ -28,10 +35,8 @@ export function resolveThreatInfo(alert: {
   const metadata = toRecord(alert.metadata);
   const rawScore = alert.threat_score ?? metadata.threat_score ?? 0;
   const parsedScore = Number(rawScore);
-  const score = Number.isFinite(parsedScore) ? Math.max(0, Math.round(parsedScore)) : 0;
-
-  const rawLevel = alert.threat_level ?? metadata.threat_level ?? "LOW";
-  const level = normalizeThreatLevel(rawLevel);
+  const score = Number.isFinite(parsedScore) ? Math.min(100, Math.max(0, Math.round(parsedScore))) : 0;
+  const level = threatLevelFromScore(score);
 
   return { score, level };
 }

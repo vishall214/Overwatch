@@ -53,6 +53,10 @@ COOLDOWN_SECONDS: dict[str, float] = {
 # Seconds after last detection before an event state entry is purged
 EVENT_STATE_TTL: float = 45.0
 
+# Small grace window before resetting loiter timers after zone exit.
+# Prevents one-frame intersection flicker from causing false resets.
+LOITER_EXIT_GRACE_SECONDS: float = 0.5
+
 
 class BehaviorWorker:
     """
@@ -109,8 +113,10 @@ class BehaviorWorker:
         self._is_running: bool = False
         self._analyze_count: int = 0
         self._active_intrusions: set[int] = set()
-        self._loiter_state: dict[int, float] = {}
-        self._loiter_alerted: set[int] = set()
+        self._loiter_state: dict[str, float] = {}
+        self._loiter_alerted: set[str] = set()
+        self._loiter_grace_deadlines: dict[str, float] = {}
+        self._loiter_exit_grace_seconds: float = LOITER_EXIT_GRACE_SECONDS
         self._crowd_alerted: bool = False
         self._crowd_alerted_zones: set[int] = set()
         self._face_match_alerted: set[int] = set()
@@ -118,6 +124,24 @@ class BehaviorWorker:
         self._pending_tracks: set[int] = set()
         self._face_queue: queue.Queue = queue.Queue(maxsize=32)
         self._face_thread: Optional[threading.Thread] = None
+        self._alert_queue_maxsize: int = max(1, int(settings.alert_queue_maxsize))
+        self._alert_queue_soft_limit: int = max(
+            1,
+            min(
+                self._alert_queue_maxsize,
+                int(round(self._alert_queue_maxsize * float(settings.alert_queue_soft_limit_ratio))),
+            ),
+        )
+        self._alert_queue_warn_interval_seconds: float = float(
+            settings.alert_queue_warn_interval_seconds,
+        )
+        # Drop-oldest keeps the freshest alerts under bursts.
+        self._alert_drop_strategy: str = "drop_oldest"
+        self._alert_queue: queue.Queue = queue.Queue(maxsize=self._alert_queue_maxsize)
+        self._alert_thread: Optional[threading.Thread] = None
+        self._alert_drop_count: int = 0
+        self._alert_persist_count: int = 0
+        self._last_alert_backlog_warn_ts: float = 0.0
         self._drop_count: int = 0
         self._avg_behavior_ms: float = 0.0
         self._avg_input_age_ms: float = 0.0
@@ -140,6 +164,16 @@ class BehaviorWorker:
             logger.warning("BehaviorWorker already running")
             return
 
+        if self._thread is not None and self._thread.is_alive():
+            logger.warning("BehaviorWorker thread still alive; refusing duplicate start")
+            return
+        if self._face_thread is not None and self._face_thread.is_alive():
+            logger.warning("FaceWorker thread still alive; refusing duplicate start")
+            return
+        if self._alert_thread is not None and self._alert_thread.is_alive():
+            logger.warning("AlertWorker thread still alive; refusing duplicate start")
+            return
+
         try:
             self._event_loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -150,6 +184,7 @@ class BehaviorWorker:
         self._active_intrusions.clear()
         self._loiter_state.clear()
         self._loiter_alerted.clear()
+        self._loiter_grace_deadlines.clear()
         self._crowd_alerted = False
         self._crowd_alerted_zones.clear()
         self._face_match_alerted.clear()
@@ -162,10 +197,18 @@ class BehaviorWorker:
         self._weapon_cooldown.clear()
         self._active_weapon_alerts.clear()
         self._avg_input_age_ms = 0.0
+        self._alert_drop_count = 0
+        self._alert_persist_count = 0
+        self._last_alert_backlog_warn_ts = 0.0
         # Drain any stale items from the face queue
         while not self._face_queue.empty():
             try:
                 self._face_queue.get_nowait()
+            except queue.Empty:
+                break
+        while not self._alert_queue.empty():
+            try:
+                self._alert_queue.get_nowait()
             except queue.Empty:
                 break
         # Start background face recognition thread only when feature is enabled
@@ -176,6 +219,13 @@ class BehaviorWorker:
                 daemon=True,
             )
             self._face_thread.start()
+        if self._alert_service is not None:
+            self._alert_thread = threading.Thread(
+                target=self._alert_worker_loop,
+                name="AlertWorker",
+                daemon=True,
+            )
+            self._alert_thread.start()
         self._thread = threading.Thread(
             target=self._behavior_loop,
             name="BehaviorWorker",
@@ -187,12 +237,27 @@ class BehaviorWorker:
     def stop(self) -> None:
         """Stop the behavior worker and wait for threads to finish."""
         self._is_running = False
-        if self._face_thread is not None:
-            self._face_thread.join(timeout=5.0)
-            self._face_thread = None
         if self._thread is not None:
             self._thread.join(timeout=5.0)
-            self._thread = None
+            if self._thread.is_alive():
+                logger.warning("BehaviorWorker thread did not stop within timeout")
+            else:
+                self._thread = None
+        if self._face_thread is not None:
+            self._face_thread.join(timeout=5.0)
+            if self._face_thread.is_alive():
+                logger.warning("FaceWorker thread did not stop within timeout")
+            else:
+                self._face_thread = None
+        if self._alert_thread is not None:
+            self._alert_thread.join(timeout=8.0)
+            if self._alert_thread.is_alive():
+                logger.warning(
+                    "AlertWorker thread did not stop within timeout (queue_depth=%d)",
+                    self._alert_queue.qsize(),
+                )
+            else:
+                self._alert_thread = None
         logger.info(
             "BehaviorWorker stopped (analyzed %d frames)", self._analyze_count,
         )
@@ -208,6 +273,7 @@ class BehaviorWorker:
         self._active_intrusions.clear()
         self._loiter_state.clear()
         self._loiter_alerted.clear()
+        self._loiter_grace_deadlines.clear()
         self._crowd_alerted = False
         self._crowd_alerted_zones.clear()
         self._event_states.clear()
@@ -238,6 +304,68 @@ class BehaviorWorker:
         Key format: ``{event_type}_{zone_id}_{track_id}``
         """
         return f"{event_type}_{zone_id}_{track_id}"
+
+    @staticmethod
+    def _make_loiter_key(track_id: int, zone_id: str) -> str:
+        """Build a loitering timer key scoped by track and zone."""
+        return f"{track_id}:{zone_id}"
+
+    @staticmethod
+    def _track_id_from_loiter_key(loiter_key: str) -> int:
+        """Extract track id from loiter key, returning -1 when malformed."""
+        try:
+            return int(loiter_key.split(":", 1)[0])
+        except (TypeError, ValueError):
+            return -1
+
+    def _clear_loiter_track(self, track_id: int) -> None:
+        """Clear loiter timer state for a track across all zones."""
+        prefix = f"{track_id}:"
+        stale_keys = [k for k in self._loiter_state if k.startswith(prefix)]
+        for key in stale_keys:
+            self._loiter_state.pop(key, None)
+            self._loiter_alerted.discard(key)
+            self._loiter_grace_deadlines.pop(key, None)
+
+    def _prune_loiter_keys(
+        self,
+        track_id: int,
+        active_keys: set[str],
+        now: float,
+    ) -> None:
+        """
+        Keep timers for currently intersecting loiter zones and reset exited zones.
+
+        Uses a brief grace window to avoid timer flicker from transient geometry jitter.
+        """
+        prefix = f"{track_id}:"
+        track_keys = [k for k in self._loiter_state if k.startswith(prefix)]
+        has_active_loiter_zone = len(active_keys) > 0
+        for key in track_keys:
+            if key in active_keys:
+                self._loiter_grace_deadlines.pop(key, None)
+                continue
+
+            if has_active_loiter_zone:
+                # Track moved to a different loiter zone; reset old-zone timer immediately.
+                self._loiter_state.pop(key, None)
+                self._loiter_alerted.discard(key)
+                self._loiter_grace_deadlines.pop(key, None)
+                continue
+
+            deadline = self._loiter_grace_deadlines.get(key)
+            if deadline is None:
+                self._loiter_grace_deadlines[key] = now + self._loiter_exit_grace_seconds
+                continue
+
+            if now >= deadline:
+                self._loiter_state.pop(key, None)
+                self._loiter_alerted.discard(key)
+                self._loiter_grace_deadlines.pop(key, None)
+
+    def _has_met_loiter_threshold(self, duration: float) -> bool:
+        """Return True only when elapsed duration has strictly reached threshold."""
+        return duration >= self._loiter_threshold
 
     def _update_event_state(
         self, event_key: str, now: float,
@@ -317,15 +445,15 @@ class BehaviorWorker:
         ):
             score += int(self._settings.threat_bonus_intrusion_weapon)
 
-        return max(0, int(score))
+        return max(0, min(100, int(round(score))))
 
     def _get_threat_level(self, score: int) -> str:
         """Map threat score to a normalized threat level string."""
-        if score >= int(self._settings.threat_level_critical_threshold):
+        if score >= 76:
             return "CRITICAL"
-        if score >= int(self._settings.threat_level_high_threshold):
+        if score >= 51:
             return "HIGH"
-        if score >= int(self._settings.threat_level_medium_threshold):
+        if score >= 26:
             return "MEDIUM"
         return "LOW"
 
@@ -360,6 +488,8 @@ class BehaviorWorker:
         if self._alert_service is None:
             return
 
+        frame_snapshot = frame.copy()
+
         for pending in pending_alerts:
             metadata = pending.get("metadata")
             if isinstance(metadata, dict):
@@ -377,13 +507,127 @@ class BehaviorWorker:
                     },
                 }
 
-            self._alert_service.create_alert(
+            self._enqueue_alert(
                 event_type=str(pending.get("event_type", "unknown")),
                 track_id=pending.get("track_id"),
                 zone=str(pending.get("zone", "")),
                 metadata=metadata,
-                frame=frame,
+                frame=frame_snapshot,
             )
+
+    def _maybe_log_alert_queue_backlog(self, current_depth: int) -> None:
+        """Emit throttled warnings when the alert queue nears capacity."""
+        if current_depth < self._alert_queue_soft_limit:
+            return
+
+        now = time.monotonic()
+        if (now - self._last_alert_backlog_warn_ts) < self._alert_queue_warn_interval_seconds:
+            return
+
+        self._last_alert_backlog_warn_ts = now
+        logger.warning(
+            "Alert queue backlog depth=%d/%d soft_limit=%d strategy=%s",
+            current_depth,
+            self._alert_queue_maxsize,
+            self._alert_queue_soft_limit,
+            self._alert_drop_strategy,
+        )
+
+    def _enqueue_alert(
+        self,
+        event_type: str,
+        track_id: Optional[int],
+        zone: str,
+        metadata: dict[str, Any],
+        frame: np.ndarray,
+    ) -> None:
+        """Queue alert persistence so DB/snapshot I/O never blocks behavior analysis."""
+        if self._alert_service is None:
+            return
+
+        payload = {
+            "event_type": event_type,
+            "track_id": track_id,
+            "zone": zone,
+            "metadata": dict(metadata),
+            "frame": frame,
+        }
+
+        depth_before = self._alert_queue.qsize()
+        self._maybe_log_alert_queue_backlog(depth_before)
+
+        try:
+            self._alert_queue.put_nowait(payload)
+        except queue.Full:
+            self._alert_drop_count += 1
+            dropped_event_type = "unknown"
+            try:
+                dropped = self._alert_queue.get_nowait()
+                if isinstance(dropped, dict):
+                    dropped_event_type = str(dropped.get("event_type", "unknown"))
+            except queue.Empty:
+                pass
+
+            try:
+                self._alert_queue.put_nowait(payload)
+                log_message = (
+                    "Alert queue full depth=%d/%d; dropped oldest pending alert "
+                    "type=%s and enqueued type=%s (strategy=%s dropped_total=%d)"
+                )
+                log_args = (
+                    depth_before,
+                    self._alert_queue_maxsize,
+                    dropped_event_type,
+                    event_type,
+                    self._alert_drop_strategy,
+                    self._alert_drop_count,
+                )
+                if self._alert_drop_count == 1 or self._alert_drop_count % 10 == 0:
+                    logger.warning(log_message, *log_args)
+                else:
+                    logger.debug(log_message, *log_args)
+            except queue.Full:
+                logger.error(
+                    "Alert queue remained full after drop-oldest fallback; skipped enqueue for type=%s (dropped_total=%d)",
+                    event_type,
+                    self._alert_drop_count,
+                )
+
+    def _alert_worker_loop(self) -> None:
+        """Background thread that persists queued alerts."""
+        logger.info(
+            "AlertWorker thread started (queue_maxsize=%d, soft_limit=%d, strategy=%s)",
+            self._alert_queue_maxsize,
+            self._alert_queue_soft_limit,
+            self._alert_drop_strategy,
+        )
+        while self._is_running or not self._alert_queue.empty():
+            try:
+                payload = self._alert_queue.get(timeout=0.5)
+            except queue.Empty:
+                continue
+
+            try:
+                row = self._alert_service.create_alert(
+                    event_type=str(payload.get("event_type", "unknown")),
+                    track_id=payload.get("track_id"),
+                    zone=str(payload.get("zone", "")),
+                    metadata=payload.get("metadata"),
+                    frame=payload.get("frame"),
+                )
+                if row is not None:
+                    self._alert_persist_count += 1
+            except Exception:
+                logger.exception("AlertWorker failed to persist alert")
+
+            self._maybe_log_alert_queue_backlog(self._alert_queue.qsize())
+
+        logger.info(
+            "AlertWorker thread stopped (persisted=%d dropped=%d remaining=%d)",
+            self._alert_persist_count,
+            self._alert_drop_count,
+            self._alert_queue.qsize(),
+        )
 
     def _face_worker_loop(self) -> None:
         """Background thread: dequeue person crops, run InsightFace, update caches."""
@@ -422,12 +666,12 @@ class BehaviorWorker:
                             data=match_event,
                         ))
                         if self._alert_service is not None:
-                            self._alert_service.create_alert(
+                            self._enqueue_alert(
                                 event_type="face_match",
                                 track_id=track_id,
                                 zone="",
                                 metadata=match_event,
-                                frame=frame,
+                                frame=frame.copy(),
                             )
                         logger.warning(
                             "FACE MATCH: %s (track #%d, dist=%.4f)",
@@ -550,6 +794,7 @@ class BehaviorWorker:
                     track_id = obj["track_id"]
                     current_track_ids.add(track_id)
                     is_person = obj.get("class_name", "unknown") == "person"
+                    active_loiter_keys: set[str] = set()
 
                     in_any_zone = False
 
@@ -589,17 +834,19 @@ class BehaviorWorker:
 
                             # -- Loitering (legacy) --
                             if _mod["loitering"]:
-                                if track_id not in self._loiter_state:
-                                    self._loiter_state[track_id] = now
-                                duration = now - self._loiter_state[track_id]
-                                loiter_timers[track_id] = duration
-                                if duration >= self._loiter_threshold:
+                                loiter_key = self._make_loiter_key(track_id, "A")
+                                active_loiter_keys.add(loiter_key)
+                                if loiter_key not in self._loiter_state:
+                                    self._loiter_state[loiter_key] = now
+                                duration = now - self._loiter_state[loiter_key]
+                                loiter_timers[track_id] = max(loiter_timers.get(track_id, 0.0), duration)
+                                if self._has_met_loiter_threshold(duration):
                                     loitering_detected = True
                                     ekey = self._make_event_key("loitering", "A", track_id)
                                     state = self._update_event_state(ekey, now)
                                     if self._should_trigger_alert("loitering", state, now):
                                         state["last_alert_time"] = now
-                                        self._loiter_alerted.add(track_id)
+                                        self._loiter_alerted.add(loiter_key)
                                         loiter_event = {
                                             "track_id": track_id, "duration": round(duration, 1),
                                             "zone": "A", "class_name": obj.get("class_name", "unknown"),
@@ -615,8 +862,7 @@ class BehaviorWorker:
                                         })
                                         logger.warning("LOITERING: %s #%d in Zone A for %.1fs", obj.get("class_name", "unknown"), track_id, duration)
                             else:
-                                self._loiter_state.pop(track_id, None)
-                                self._loiter_alerted.discard(track_id)
+                                self._clear_loiter_track(track_id)
                     else:
                         # ---------- User-defined rectangular zones ----------
                         for zone in user_zones:
@@ -691,17 +937,19 @@ class BehaviorWorker:
 
                             # -- Loitering (user zone) --
                             if zone_type == "loitering" and _mod["loitering"]:
-                                if track_id not in self._loiter_state:
-                                    self._loiter_state[track_id] = now
-                                duration = now - self._loiter_state[track_id]
-                                loiter_timers[track_id] = duration
-                                if duration >= self._loiter_threshold:
+                                loiter_key = self._make_loiter_key(track_id, str(zone_id))
+                                active_loiter_keys.add(loiter_key)
+                                if loiter_key not in self._loiter_state:
+                                    self._loiter_state[loiter_key] = now
+                                duration = now - self._loiter_state[loiter_key]
+                                loiter_timers[track_id] = max(loiter_timers.get(track_id, 0.0), duration)
+                                if self._has_met_loiter_threshold(duration):
                                     loitering_detected = True
                                     ekey = self._make_event_key("loitering", str(zone_id), track_id)
                                     state = self._update_event_state(ekey, now)
                                     if self._should_trigger_alert("loitering", state, now):
                                         state["last_alert_time"] = now
-                                        self._loiter_alerted.add(track_id)
+                                        self._loiter_alerted.add(loiter_key)
                                         loiter_event = {
                                             "track_id": track_id, "duration": round(duration, 1),
                                             "zone": zone_name, "class_name": obj.get("class_name", "unknown"),
@@ -717,11 +965,14 @@ class BehaviorWorker:
                                         })
                                         logger.warning("LOITERING: %s #%d in %s for %.1fs", obj.get("class_name", "unknown"), track_id, zone_name, duration)
 
+                    if _mod["loitering"]:
+                        self._prune_loiter_keys(track_id, active_loiter_keys, now)
+                    else:
+                        self._clear_loiter_track(track_id)
+
                     if not in_any_zone:
                         # Object left all zones
                         self._active_intrusions.discard(track_id)
-                        self._loiter_state.pop(track_id, None)
-                        self._loiter_alerted.discard(track_id)
 
                 # --- Crowd detection (event-state-driven) ---------------
                 if use_legacy:
@@ -778,10 +1029,15 @@ class BehaviorWorker:
                             self._crowd_alerted_zones.discard(zid)
 
                 # Clean up state for tracks that disappeared
-                stale_ids = set(self._loiter_state.keys()) - current_track_ids
-                for tid in stale_ids:
-                    self._loiter_state.pop(tid, None)
-                    self._loiter_alerted.discard(tid)
+                stale_track_ids = {
+                    self._track_id_from_loiter_key(key)
+                    for key in self._loiter_state.keys()
+                    if self._track_id_from_loiter_key(key) not in current_track_ids
+                }
+                for tid in stale_track_ids:
+                    if tid < 0:
+                        continue
+                    self._clear_loiter_track(tid)
                     self._active_intrusions.discard(tid)
 
                 # Clean up stale event states (memory leak prevention)
@@ -1375,12 +1631,12 @@ class BehaviorWorker:
                             "metadata": weapon_event,
                         })
                     elif self._alert_service is not None:
-                        self._alert_service.create_alert(
+                        self._enqueue_alert(
                             event_type=event_type,
                             track_id=None,
                             zone=zone_name if in_zone else "",
                             metadata=weapon_event,
-                            frame=frame,
+                            frame=frame.copy(),
                         )
 
                     logger.warning(
@@ -1530,4 +1786,7 @@ class BehaviorWorker:
             "face_queue_depth": self._face_queue.qsize(),
             "pending_face_tracks": len(self._pending_tracks),
             "active_event_states": len(self._event_states),
+            "alert_queue_depth": self._alert_queue.qsize(),
+            "alerts_persisted": self._alert_persist_count,
+            "alerts_dropped": self._alert_drop_count,
         }

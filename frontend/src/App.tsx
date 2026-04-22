@@ -59,7 +59,14 @@ function AppLayout() {
       >
         <Routes>
           <Route path="/" element={<Landing />} />
-          <Route path="/dashboard" element={<Navigate to="/monitor" replace />} />
+          <Route
+            path="/dashboard"
+            element={
+              <ProtectedRoute>
+                <Navigate to="/monitor" replace />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/monitor"
             element={

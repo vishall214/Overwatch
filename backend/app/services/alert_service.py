@@ -12,7 +12,7 @@ import os
 import threading
 import time as _time
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 import cv2
 import numpy as np
@@ -39,10 +39,10 @@ class AlertService:
     def __init__(self, settings: Settings) -> None:
         self._settings: Settings = settings
         os.makedirs(settings.snapshots_dir, exist_ok=True)
-        # Lightweight in-memory duplicate guard (safety net)
-        # Maps "{event_type}_{zone}" -> last alert monotonic timestamp
+        # In-memory duplicate suppression keyed by event/zone/object identity.
         self._recent_alerts: dict[str, float] = {}
-        self._duplicate_window: float = 10.0  # seconds
+        self._duplicate_window: float = float(settings.alert_duplicate_window_seconds)
+        self._recent_alerts_lock = threading.Lock()
         self._snapshot_cleanup_counter: int = 0
         self._snapshot_lock = threading.Lock()
 
@@ -55,6 +55,60 @@ class AlertService:
             1,
             int(settings.snapshot_cleanup_every_alerts),
         )
+
+    @staticmethod
+    def _normalize_text_key(value: Any, default: str = "unknown") -> str:
+        text = str(value or "").strip().lower()
+        return text if text else default
+
+    def _build_dedup_key(
+        self,
+        event_type: str,
+        zone: str,
+        track_id: Optional[int],
+        metadata: Optional[dict[str, Any]],
+    ) -> str:
+        payload = metadata or {}
+
+        zone_key = payload.get("zone_id")
+        if zone_key is None:
+            zone_key = payload.get("zone")
+        if zone_key is None:
+            zone_key = zone
+
+        object_key: Any = track_id
+        if object_key is None:
+            object_key = payload.get("track_id")
+        if object_key is None:
+            object_key = payload.get("object_id")
+        if object_key is None:
+            object_key = payload.get("object_type")
+        if object_key is None:
+            object_key = payload.get("class_name")
+
+        return "|".join(
+            [
+                self._normalize_text_key(event_type),
+                self._normalize_text_key(zone_key),
+                self._normalize_text_key(object_key, default="none"),
+            ]
+        )
+
+    def _is_duplicate_within_window(self, dedup_key: str) -> bool:
+        now_mono = _time.monotonic()
+        with self._recent_alerts_lock:
+            # Opportunistically prune stale dedup keys.
+            prune_before = now_mono - (self._duplicate_window * 3)
+            stale_keys = [k for k, ts in self._recent_alerts.items() if ts < prune_before]
+            for key in stale_keys:
+                self._recent_alerts.pop(key, None)
+
+            last_ts = self._recent_alerts.get(dedup_key, 0.0)
+            if last_ts > 0 and (now_mono - last_ts) < self._duplicate_window:
+                return True
+
+            self._recent_alerts[dedup_key] = now_mono
+            return False
 
     def create_alert(
         self,
@@ -75,21 +129,22 @@ class AlertService:
             frame: Current video frame for snapshot capture.
 
         Returns:
-            AlertRow: The newly created database row.
+            AlertRow | None: The newly created database row, or None when suppressed.
         """
         now = datetime.now(timezone.utc)
         snapshot_path = ""
 
-        # Duplicate guard (diagnostic only — never drops alerts)
-        dup_key = f"{event_type}_{zone}"
-        _now_mono = _time.monotonic()
-        last_ts = self._recent_alerts.get(dup_key, 0.0)
-        if last_ts > 0 and (_now_mono - last_ts) < self._duplicate_window:
-            logger.warning(
-                "Duplicate alert detected: %s (zone=%s) within %.0fs window",
-                event_type, zone, self._duplicate_window,
+        dup_key = self._build_dedup_key(event_type, zone, track_id, metadata)
+        if self._is_duplicate_within_window(dup_key):
+            logger.debug(
+                "Duplicate alert suppressed: type=%s zone=%s track=%s key=%s window=%.1fs",
+                event_type,
+                zone,
+                track_id,
+                dup_key,
+                self._duplicate_window,
             )
-        self._recent_alerts[dup_key] = _now_mono
+            return None
 
         if frame is not None:
             snapshot_path = self._save_snapshot(event_type, now, frame)

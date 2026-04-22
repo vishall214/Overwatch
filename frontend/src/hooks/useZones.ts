@@ -1,14 +1,18 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchZones, createZone, deleteZone } from "../api/zones";
 import type { ZoneCreatePayload } from "../api/zones";
+import { getVisibleRefetchInterval, POLLING_INTERVAL_MS } from "./polling";
 
-export function useZones() {
+export function useZones(enabled = true) {
   const queryClient = useQueryClient();
 
   const query = useQuery({
     queryKey: ["zones"],
     queryFn: fetchZones,
-    refetchInterval: 10_000,
+    enabled,
+    refetchInterval: () =>
+      enabled ? getVisibleRefetchInterval(POLLING_INTERVAL_MS.zones) : false,
+    refetchOnWindowFocus: true,
   });
 
   const addMutation = useMutation({

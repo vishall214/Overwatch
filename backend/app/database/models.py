@@ -34,10 +34,10 @@ class AlertRow(Base):
     __tablename__ = "alerts"
 
     id = Column(Integer, primary_key=True, index=True)
-    event_type = Column(String, nullable=False)
+    event_type = Column(String, nullable=False, index=True)
     track_id = Column(Integer, nullable=True)
     zone = Column(String, nullable=True)
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
     snapshot_path = Column(String, nullable=True)
     metadata_ = Column("metadata", JSON, nullable=True)
 

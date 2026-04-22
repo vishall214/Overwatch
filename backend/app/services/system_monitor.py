@@ -9,6 +9,7 @@ This service never modifies pipeline state.
 """
 
 import logging
+import time
 from typing import Optional
 
 from sqlalchemy import func
@@ -39,6 +40,9 @@ class SystemMonitor:
     ) -> None:
         self._pipeline = pipeline
         self._modules: Optional[ModuleController] = module_controller
+        self._alerts_total_cache_value: int = 0
+        self._alerts_total_cache_ts: float = 0.0
+        self._alerts_total_cache_ttl_seconds: float = 2.0
 
     def set_pipeline(self, pipeline) -> None:
         """Late-bind the pipeline reference (set during startup)."""
@@ -148,9 +152,16 @@ class SystemMonitor:
     # ─────────────────────────────────────────────────────────────
 
     def _get_total_alert_count(self) -> int:
+        now = time.monotonic()
+        if (now - self._alerts_total_cache_ts) < self._alerts_total_cache_ttl_seconds:
+            return self._alerts_total_cache_value
+
         db = SessionLocal()
         try:
-            return db.query(func.count(AlertRow.id)).scalar() or 0
+            value = db.query(func.count(AlertRow.id)).scalar() or 0
+            self._alerts_total_cache_value = int(value)
+            self._alerts_total_cache_ts = now
+            return self._alerts_total_cache_value
         finally:
             db.close()
 

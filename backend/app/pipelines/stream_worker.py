@@ -74,6 +74,10 @@ class StreamWorker:
             logger.warning("StreamWorker already running")
             return
 
+        if self._thread is not None and self._thread.is_alive():
+            logger.warning("StreamWorker thread still alive; refusing duplicate start")
+            return
+
         self._is_running = True
         self._encode_count = 0
         self._drop_count = 0
@@ -96,7 +100,10 @@ class StreamWorker:
         self._is_running = False
         if self._thread is not None:
             self._thread.join(timeout=5.0)
-            self._thread = None
+            if self._thread.is_alive():
+                logger.warning("StreamWorker thread did not stop within timeout")
+            else:
+                self._thread = None
         logger.info("StreamWorker stopped (encoded %d frames)", self._encode_count)
 
     def _encode_loop(self) -> None:

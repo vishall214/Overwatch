@@ -70,7 +70,9 @@ async def list_alerts(limit: int = 100) -> AlertListResponse:
             )
         )
     return AlertListResponse(
+        success=True,
         alerts=alerts,
+        data=alerts,
         total=service.get_alert_count(),
     )
 

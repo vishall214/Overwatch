@@ -94,6 +94,10 @@ class InferenceWorker:
             logger.warning("InferenceWorker already running")
             return
 
+        if self._thread is not None and self._thread.is_alive():
+            logger.warning("InferenceWorker thread still alive; refusing duplicate start")
+            return
+
         if not self._detection_service.is_loaded:
             logger.error("Cannot start InferenceWorker: detection model not loaded")
             return
@@ -127,7 +131,10 @@ class InferenceWorker:
         self._is_running = False
         if self._thread is not None:
             self._thread.join(timeout=10.0)
-            self._thread = None
+            if self._thread.is_alive():
+                logger.warning("InferenceWorker thread did not stop within timeout")
+            else:
+                self._thread = None
         logger.info(
             "InferenceWorker stopped (processed %d frames, avg %.1f ms/frame)",
             self._inference_count,
@@ -196,7 +203,7 @@ class InferenceWorker:
                     weapon_results = self._detection_service.detect_weapons(packet.frame)
                     weapon_detections_list = [d.to_dict() for d in weapon_results]
                     if weapon_detections_list:
-                        logger.info(
+                        logger.debug(
                             "weapon candidates frame=%d count=%d labels=%s",
                             packet.frame_index,
                             len(weapon_detections_list),

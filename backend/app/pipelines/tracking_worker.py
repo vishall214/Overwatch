@@ -88,6 +88,10 @@ class TrackingWorker:
             logger.warning("TrackingWorker already running")
             return
 
+        if self._thread is not None and self._thread.is_alive():
+            logger.warning("TrackingWorker thread still alive; refusing duplicate start")
+            return
+
         self._is_running = True
         self._track_count = 0
         self._drop_count = 0
@@ -107,7 +111,10 @@ class TrackingWorker:
         self._is_running = False
         if self._thread is not None:
             self._thread.join(timeout=5.0)
-            self._thread = None
+            if self._thread.is_alive():
+                logger.warning("TrackingWorker thread did not stop within timeout")
+            else:
+                self._thread = None
         logger.info(
             "TrackingWorker stopped (tracked %d frames)", self._track_count,
         )

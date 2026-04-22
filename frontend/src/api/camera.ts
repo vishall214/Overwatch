@@ -1,4 +1,5 @@
 import { API } from "./config";
+import { getAuthHeaders } from "./auth";
 import type { CameraStatus } from "../types/system";
 
 async function readErrorMessage(res: Response, fallback: string): Promise<string> {
@@ -14,7 +15,9 @@ export async function startCamera(source?: string): Promise<{ message: string }>
   const body = source != null ? JSON.stringify({ source }) : undefined;
   const res = await fetch(API.camera.start, {
     method: "POST",
-    headers: body != null ? { "Content-Type": "application/json" } : undefined,
+    headers: body != null
+      ? { "Content-Type": "application/json", ...getAuthHeaders() }
+      : getAuthHeaders(),
     body,
   });
 
@@ -29,7 +32,10 @@ export async function startCamera(source?: string): Promise<{ message: string }>
 }
 
 export async function stopCamera(): Promise<{ message: string }> {
-  const res = await fetch(API.camera.stop, { method: "POST" });
+  const res = await fetch(API.camera.stop, {
+    method: "POST",
+    headers: getAuthHeaders(),
+  });
   if (!res.ok) throw new Error(await readErrorMessage(res, "Failed to stop camera"));
   return res.json();
 }

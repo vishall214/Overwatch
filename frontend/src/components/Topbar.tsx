@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { LoaderCircle, LogIn, LogOut, Square, User, Video, Wifi, WifiOff } from "lucide-react";
+import { LoaderCircle, LogIn, LogOut, Square, User, UserPlus, Video, Wifi, WifiOff } from "lucide-react";
 import { startCamera, stopCamera } from "../api/camera";
 import { useAuth } from "../context/AuthContext";
 import { useCameraStatus } from "../hooks/useCameraStatus";
@@ -141,10 +141,16 @@ export default function Topbar({ collapsed }: { collapsed: boolean }) {
               </button>
             </>
           ) : (
-            <Link to="/login" className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-accentCyan page-transition hover:scale-[1.02] hover:bg-white/10">
-              <LogIn className="h-3.5 w-3.5" />
-              Sign In
-            </Link>
+            <div className="flex items-center gap-1.5">
+              <Link to="/login" className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-accentCyan page-transition hover:scale-[1.02] hover:bg-white/10">
+                <LogIn className="h-3.5 w-3.5" />
+                Sign In
+              </Link>
+              <Link to="/signup" className="inline-flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent/15 px-3 py-1.5 text-xs font-semibold text-textPrimary page-transition hover:scale-[1.02] hover:bg-accent/25">
+                <UserPlus className="h-3.5 w-3.5" />
+                Sign Up
+              </Link>
+            </div>
           )}
         </div>
       </div>

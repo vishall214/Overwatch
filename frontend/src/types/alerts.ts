@@ -13,7 +13,9 @@ export interface Alert {
 }
 
 export interface AlertListResponse {
+  success?: boolean;
   alerts: Alert[];
+  data?: Alert[];
   total: number;
 }
 

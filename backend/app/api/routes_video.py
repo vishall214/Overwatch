@@ -10,7 +10,7 @@ import os
 import asyncio
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 
 from app.schemas.video_schema import (
     SourceSwitchRequest,
@@ -20,6 +20,7 @@ from app.schemas.video_schema import (
 )
 from app.services.source_manager import SourceManager, UPLOADS_DIR
 from app.pipelines.video_pipeline import VideoPipeline
+from app.core.security import get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,18 @@ _source_manager: Optional[SourceManager] = None
 # Maximum upload size: 200 MB
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 ALLOWED_EXTENSIONS = {".mp4", ".avi"}
+SUPPORTED_MODULES = {"intrusion", "loitering", "crowd", "weapon_detection"}
+
+
+def _normalize_module_name(module: Optional[str]) -> Optional[str]:
+    if module is None:
+        return None
+    normalized = module.strip().lower()
+    if normalized == "weapons":
+        return "weapon_detection"
+    if normalized in SUPPORTED_MODULES:
+        return normalized
+    raise HTTPException(status_code=400, detail=f"Unsupported module '{module}'")
 
 
 def init_video_routes(
@@ -71,6 +84,7 @@ def _resolve_upload_file_path(filename: str) -> str:
 @router.post("/source", response_model=SourceSwitchResponse)
 async def switch_source(
     request: SourceSwitchRequest,
+    _: int = Depends(get_current_user),
 ) -> SourceSwitchResponse:
     """
     Switch the active video source.
@@ -82,10 +96,11 @@ async def switch_source(
     Accepts: camera, demo, or upload source types.
     """
     pipeline, source_mgr = _get_deps()
+    normalized_module = _normalize_module_name(request.module)
 
     logger.info(
         "Source switch requested: type=%s module=%s name=%s category=%s path=%s",
-        request.type, request.module, request.name, request.category, request.path,
+        request.type, normalized_module, request.name, request.category, request.path,
     )
 
     try:
@@ -103,7 +118,7 @@ async def switch_source(
     # Switch source via pipeline (or start pipeline if it is currently stopped)
     try:
         if not pipeline.is_running:
-            pipeline.set_active_module(request.module)
+            pipeline.set_active_module(normalized_module)
             logger.info(
                 "Pipeline is stopped; starting directly with requested source: %s",
                 target_source_for_start,
@@ -118,7 +133,7 @@ async def switch_source(
                 pipeline.switch_source,
                 request.type,
                 resolved_path,
-                request.module,
+                normalized_module,
             )
 
             if not success:
@@ -136,6 +151,7 @@ async def switch_source(
     source_name = source_info.get("source_name", "Unknown")
 
     return SourceSwitchResponse(
+        success=True,
         message=f"Source switched to {source_name}",
         source_type=source_type,
         source_name=source_name,
@@ -157,6 +173,7 @@ async def list_demo_videos(
 @router.post("/upload", response_model=UploadResponse)
 async def upload_video(
     file: UploadFile = File(...),
+    _: int = Depends(get_current_user),
 ) -> UploadResponse:
     """
     Upload a video file for analysis.
@@ -195,15 +212,18 @@ async def upload_video(
     logger.info("Video uploaded: %s (%d bytes)", filepath, len(content))
 
     return UploadResponse(
+        success=True,
         message=f"Video uploaded: {safe_name}",
         filename=safe_name,
         path=filepath,
+        size_mb=round(len(content) / (1024 * 1024), 2),
     )
 
 
 @router.delete("/upload/{filename}")
 async def delete_upload(
     filename: str,
+    _: int = Depends(get_current_user),
 ) -> dict:
     """Delete an uploaded video by filename."""
     pipeline, _ = _get_deps()

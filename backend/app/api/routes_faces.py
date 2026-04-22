@@ -9,10 +9,11 @@ from typing import Optional
 
 import cv2
 import numpy as np
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from app.database.database import SessionLocal
 from app.database.crud import create_face_row, get_all_faces, delete_face_by_name
+from app.core.security import get_current_user
 from app.services.face.face_service import FaceService
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,7 @@ def _get_face_service() -> FaceService:
 async def register_face(
     name: str = Form(...),
     image: UploadFile = File(...),
+    _: int = Depends(get_current_user),
 ) -> dict:
     """
     Register a new watchlist face.
@@ -100,7 +102,7 @@ async def list_faces() -> dict:
 
 
 @router.delete("/{name}")
-async def remove_face(name: str) -> dict:
+async def remove_face(name: str, _: int = Depends(get_current_user)) -> dict:
     """Remove an enrolled face identity by name."""
     service = _get_face_service()
 

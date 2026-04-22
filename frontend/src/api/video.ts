@@ -3,17 +3,17 @@ import { getAuthHeaders } from "./auth";
 
 export interface SourceSwitchRequest {
   type: "camera" | "demo" | "upload";
-  module?: "intrusion" | "loitering" | "crowd";
+  module?: "intrusion" | "loitering" | "crowd" | "weapon_detection";
   name?: string;
   category?: string;
   path?: string;
 }
 
 export interface SourceSwitchResponse {
-  success: boolean;
+  success?: boolean;
   message: string;
   source_type: string;
-  source_path: string | null;
+  source_name: string;
 }
 
 export interface DemoVideoList {
@@ -40,7 +40,7 @@ export interface SourceInfo {
   source_name: string;
   is_open: boolean;
   is_capturing: boolean;
-  active_module?: "intrusion" | "loitering" | "crowd" | null;
+  active_module?: "intrusion" | "loitering" | "crowd" | "weapon_detection" | null;
 }
 
 /**

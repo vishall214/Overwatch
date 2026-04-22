@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap");
 
 @tailwind base;
 @tailwind components;
@@ -23,6 +23,10 @@
       radial-gradient(circle at 85% 100%, rgba(34, 211, 238, 0.12), transparent 38%),
       #071219;
     font-family: "Outfit", "Segoe UI", sans-serif;
+  }
+
+  html {
+    scroll-behavior: smooth;
   }
 }
 
@@ -53,17 +57,6 @@
     transition: all 300ms ease-out;
   }
 
-  .reveal-block {
-    opacity: 0;
-    transform: translateY(16px);
-    transition: all 600ms ease-out;
-  }
-
-  .reveal-block.is-visible {
-    opacity: 1;
-    transform: translateY(0);
-  }
-
   .hero-gradient {
     background: linear-gradient(120deg, rgba(20, 184, 166, 0.14), rgba(34, 211, 238, 0.1), rgba(20, 184, 166, 0.08));
     background-size: 200% 200%;
@@ -90,6 +83,58 @@
   .btn-secondary:hover {
     transform: scale(1.02);
     box-shadow: 0 0 20px rgba(20, 184, 166, 0.2);
+  }
+
+  /* ─── Landing page ─── */
+  .landing-section {
+    @apply relative z-10 mx-auto w-full max-w-6xl px-6 md:px-8;
+    padding-top: 5rem;
+    padding-bottom: 5rem;
+  }
+
+  .landing-section-label {
+    @apply text-xs uppercase tracking-[0.18em] text-accentCyan font-medium;
+  }
+
+  .landing-section-title {
+    @apply mt-2 text-3xl font-bold text-textPrimary;
+  }
+
+  /* Flow connector line (SVG) */
+  .flow-connector {
+    stroke: rgba(20, 184, 166, 0.35);
+    stroke-width: 2;
+    fill: none;
+    stroke-linecap: round;
+  }
+
+  .flow-connector-active {
+    stroke: #14b8a6;
+    filter: drop-shadow(0 0 6px rgba(20, 184, 166, 0.5));
+  }
+
+  .flow-step {
+    transition: all 400ms ease-out;
+  }
+
+  .flow-step-active {
+    border-color: rgba(20, 184, 166, 0.5) !important;
+    box-shadow: 0 0 30px rgba(20, 184, 166, 0.2), 0 0 60px rgba(20, 184, 166, 0.08) !important;
+  }
+
+  /* Preview mock card */
+  .preview-mock {
+    @apply glass-card overflow-hidden;
+  }
+
+  .preview-mock-bar {
+    @apply flex items-center gap-1.5 px-3 py-2;
+    background: rgba(255, 255, 255, 0.03);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .preview-mock-dot {
+    @apply h-2 w-2 rounded-full;
   }
 }
 

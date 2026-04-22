@@ -75,6 +75,10 @@ class Settings(BaseSettings):
     inference_skip_frames: int = 1  # Inference-stage skip (1 = no extra skipping)
     pipeline_max_resolution: int = 640
     queue_size: int = 32  # Max items per inter-worker queue
+    alert_queue_maxsize: int = Field(default=128, ge=16)
+    alert_queue_soft_limit_ratio: float = Field(default=0.75, gt=0.0, le=1.0)
+    alert_queue_warn_interval_seconds: float = Field(default=5.0, ge=0.5)
+    alert_duplicate_window_seconds: float = Field(default=8.0, ge=0.1)
 
     # ── Face Recognition ────────────────────────────────────────
     enable_face_recognition: bool = False  # Set True to re-enable at runtime

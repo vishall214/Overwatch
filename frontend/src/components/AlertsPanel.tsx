@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState, type ReactNode } from "react";
+﻿import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import gsap from "gsap";
 import { useNavigate } from "react-router-dom";
 import { AlertTriangle, Crosshair, Eye, ShieldAlert, UserCheck, Users } from "lucide-react";
@@ -190,21 +190,28 @@ export default function AlertsPanel({ compact = false }: { compact?: boolean }) 
   useEffect(() => {
     if (!data || !listRef.current) return;
 
-    const newCount = data.alerts.length;
-    if (newCount > prevCountRef.current) {
-      const newCards = listRef.current.querySelectorAll(".alert-card");
-      const toAnimate = Array.from(newCards).slice(0, newCount - prevCountRef.current);
-      if (toAnimate.length > 0) {
-        gsap.fromTo(
-          toAnimate,
-          { opacity: 0, x: -16, scale: 0.97 },
-          { opacity: 1, x: 0, scale: 1, duration: 0.35, stagger: 0.04, ease: "power2.out" }
-        );
+    const ctx = gsap.context(() => {
+      const newCount = data.alerts.length;
+      if (newCount > prevCountRef.current) {
+        const newCards = listRef.current?.querySelectorAll(".alert-card") ?? [];
+        const toAnimate = Array.from(newCards).slice(0, newCount - prevCountRef.current);
+        if (toAnimate.length > 0) {
+          gsap.killTweensOf(toAnimate);
+          gsap.fromTo(
+            toAnimate,
+            { opacity: 0, x: -16, scale: 0.97 },
+            { opacity: 1, x: 0, scale: 1, duration: 0.35, stagger: 0.04, ease: "power2.out" }
+          );
+        }
       }
-    }
 
-    prevCountRef.current = newCount;
-  }, [data]);
+      prevCountRef.current = newCount;
+    }, listRef);
+
+    return () => {
+      ctx.revert();
+    };
+  }, [data?.alerts?.length]);
 
   if (isLoading) {
     return (
@@ -214,9 +221,13 @@ export default function AlertsPanel({ compact = false }: { compact?: boolean }) 
     );
   }
 
-  const sorted = [...(data?.alerts ?? [])]
-    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-    .slice(0, maxVisibleAlerts);
+  const sorted = useMemo(
+    () =>
+      [...(data?.alerts ?? [])]
+        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+        .slice(0, maxVisibleAlerts),
+    [data?.alerts, maxVisibleAlerts]
+  );
 
   return (
     <PanelCard title="Alerts" badge={sorted.length} compact={compact}>

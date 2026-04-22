@@ -178,7 +178,15 @@ async def recent_alerts(limit: int = 20, range_: str = "24h") -> dict:
         db = SessionLocal()
         try:
             rows = (
-                db.query(AlertRow)
+                db.query(
+                    AlertRow.id,
+                    AlertRow.event_type,
+                    AlertRow.zone,
+                    AlertRow.timestamp,
+                    AlertRow.track_id,
+                    AlertRow.snapshot_path,
+                    AlertRow.metadata_,
+                )
                 .filter(AlertRow.timestamp >= cutoff)
                 .order_by(AlertRow.timestamp.desc())
                 .limit(limit)

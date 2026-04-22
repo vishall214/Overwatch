@@ -28,5 +28,7 @@ class AlertResponse(BaseModel):
 class AlertListResponse(BaseModel):
     """Schema for a list of alerts."""
 
+    success: bool = True
     alerts: list[AlertResponse] = []
+    data: list[AlertResponse] = []
     total: int = 0

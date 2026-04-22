@@ -17,10 +17,11 @@ Routes:
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.services.module_controller import ModuleController, SUPPORTED_MODULES
 from app.services.system_monitor import SystemMonitor
+from app.core.security import get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +90,7 @@ async def get_modules() -> dict:
 # ─────────────────────────────────────────────────────────────────
 
 @router.post("/modules/{name}/enable")
-async def enable_module(name: str) -> dict:
+async def enable_module(name: str, _: int = Depends(get_current_user)) -> dict:
     """
     Enable an analytics module by name.
 
@@ -113,7 +114,7 @@ async def enable_module(name: str) -> dict:
 # ─────────────────────────────────────────────────────────────────
 
 @router.post("/modules/{name}/disable")
-async def disable_module(name: str) -> dict:
+async def disable_module(name: str, _: int = Depends(get_current_user)) -> dict:
     """
     Disable an analytics module by name.
 

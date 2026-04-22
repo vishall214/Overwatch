@@ -9,7 +9,7 @@ import logging
 import queue
 from typing import AsyncIterator, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from app.config import Settings
@@ -26,11 +26,18 @@ from app.api.routes_faces import init_face_routes
 from app.api.routes_system import init_system_routes
 from app.api.routes_zones import init_zone_routes
 from app.core.dependencies import get_module_controller, get_system_monitor
+from app.core.security import get_current_user
 from app.services.zone_service import ZoneService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/camera", tags=["Camera"])
+
+
+def _normalize_module_name(module: Optional[str]) -> Optional[str]:
+    if module is None:
+        return None
+    return "weapon_detection" if module == "weapons" else module
 
 # ── Service singletons (initialized in main.py lifespan) ────────
 _pipeline: Optional[VideoPipeline] = None
@@ -169,6 +176,7 @@ async def _mjpeg_generator(stream_request_module: Optional[str] = None) -> Async
 @router.post("/start")
 async def start_pipeline(
     request: CameraStartRequest = CameraStartRequest(),
+    _: int = Depends(get_current_user),
 ) -> dict:
     """
     Start the video processing pipeline.
@@ -201,7 +209,7 @@ async def start_pipeline(
 
 
 @router.post("/stop")
-async def stop_pipeline() -> dict:
+async def stop_pipeline(_: int = Depends(get_current_user)) -> dict:
     """
     Stop the video processing pipeline.
 
@@ -251,17 +259,18 @@ async def mjpeg_stream(module: Optional[str] = Query(default=None)) -> Streaming
         )
 
     source_info = pipeline.current_source_info
-    active_module = source_info.get("active_module")
-    if module and active_module and module != active_module:
+    requested_module = _normalize_module_name(module)
+    active_module = _normalize_module_name(source_info.get("active_module"))
+    if requested_module and active_module and requested_module != active_module:
         raise HTTPException(
             status_code=409,
             detail=(
                 f"Stream is active for module '{active_module}', "
-                f"not '{module}'."
+                f"not '{requested_module}'."
             ),
         )
 
     return StreamingResponse(
-        _mjpeg_generator(module),
+        _mjpeg_generator(requested_module),
         media_type="multipart/x-mixed-replace; boundary=frame",
     )
