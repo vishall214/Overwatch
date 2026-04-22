@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import gsap from "gsap";
 import { useNavigate } from "react-router-dom";
 import { AlertTriangle, Crosshair, Eye, ShieldAlert, UserCheck, Users } from "lucide-react";
@@ -213,14 +213,6 @@ export default function AlertsPanel({ compact = false }: { compact?: boolean }) 
     };
   }, [data?.alerts?.length]);
 
-  if (isLoading) {
-    return (
-      <PanelCard title="Alerts" compact={compact}>
-        <div className="flex items-center justify-center h-32 text-sm text-textSecondary">Loading alerts...</div>
-      </PanelCard>
-    );
-  }
-
   const sorted = useMemo(
     () =>
       [...(data?.alerts ?? [])]
@@ -228,6 +220,14 @@ export default function AlertsPanel({ compact = false }: { compact?: boolean }) 
         .slice(0, maxVisibleAlerts),
     [data?.alerts, maxVisibleAlerts]
   );
+
+  if (isLoading) {
+    return (
+      <PanelCard title="Alerts" compact={compact}>
+        <div className="flex items-center justify-center h-32 text-sm text-textSecondary">Loading alerts...</div>
+      </PanelCard>
+    );
+  }
 
   return (
     <PanelCard title="Alerts" badge={sorted.length} compact={compact}>
