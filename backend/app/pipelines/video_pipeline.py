@@ -315,7 +315,22 @@ class VideoPipeline:
         if module:
             self._active_module = module
 
-        return self._capture_worker.switch_source(source_type, path)
+        success = self._capture_worker.switch_source(source_type, path)
+
+        # Flush all pipeline queues to discard stale frames from the
+        # previous source.  Without this, frames already in-flight
+        # through inference → tracking → behavior → stream continue to
+        # be served alongside the new source, causing a visual overlap
+        # of the old and new video.
+        if success:
+            self._queues.clear_all()
+            logger.info(
+                "Pipeline queues flushed after source switch to %s (%s)",
+                source_type,
+                path or "default",
+            )
+
+        return success
 
     def set_active_module(self, module: Optional[str]) -> None:
         """Set active module metadata for source ownership diagnostics."""

@@ -145,7 +145,7 @@ export default function SourceSelector({ moduleType, onSourceChanged }: SourceSe
   };
 
   return (
-    <div className="glass rounded-xl p-3 h-full">
+    <div className="glass rounded-xl p-3">
       <div className="flex flex-col gap-3">
         <p className="text-sm font-semibold text-textSecondary uppercase tracking-wider">Video Source</p>
 

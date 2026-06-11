@@ -42,7 +42,6 @@ export default function Monitor() {
   const [searchParams, setSearchParams] = useSearchParams();
   const moduleFromQuery = useMemo(() => parseModuleQuery(searchParams.get("module")), [searchParams]);
   const [activeModule, setActiveModule] = useState<MonitorModule>(moduleFromQuery ?? "intrusion");
-  const [showZones, setShowZones] = useState(true);
   const [drawZones, setDrawZones] = useState(false);
   const [clearZonesSignal, setClearZonesSignal] = useState(0);
   const activeZoneType = useMemo(() => toZoneType(activeModule), [activeModule]);
@@ -69,9 +68,10 @@ export default function Monitor() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-4">
-        <div className="glass rounded-xl p-3">
+    <div className="grid grid-cols-12 gap-4 h-[calc(100vh-56px-2.5rem)]">
+      {/* Left column: Active Module + Zone controls + Video feed */}
+      <div className="col-span-12 xl:col-span-8 flex flex-col gap-4 min-h-0">
+        <div className="glass rounded-xl p-3 shrink-0">
           <p className="text-xs font-semibold text-textSecondary uppercase tracking-wider mb-2">Active Module</p>
           <div className="flex flex-wrap gap-2">
             {MODULE_TABS.map((tab) => {
@@ -92,61 +92,37 @@ export default function Monitor() {
             })}
           </div>
         </div>
-        <SourceSelector moduleType={activeModule} />
-      </div>
 
-      <div className="grid grid-cols-12 gap-4">
-        <div className="col-span-12 xl:col-span-8">
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 mb-2">
-              <button
-                type="button"
-                onClick={() => {
-                  if (!showZones) setShowZones(true);
-                  setDrawZones((previous) => !previous);
-                }}
-                className={`glass-card px-3 py-1 rounded-lg text-sm hover:scale-[1.02] transition-all border ${
-                  drawZones
-                    ? "border-teal-400 bg-teal-500/20 text-white"
-                    : "border-border text-textSecondary hover:text-textPrimary"
-                }`}
-              >
-                Draw
-              </button>
+        <div className="flex flex-col gap-2 flex-1 min-h-0">
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setDrawZones((previous) => !previous)}
+              className={`glass-card px-3 py-1 rounded-lg text-sm hover:scale-[1.02] transition-all border ${
+                drawZones
+                  ? "border-teal-400 bg-teal-500/20 text-white"
+                  : "border-border text-textSecondary hover:text-textPrimary"
+              }`}
+            >
+              Draw
+            </button>
 
-              <button
-                type="button"
-                onClick={() => setClearZonesSignal((previous) => previous + 1)}
-                className="glass-card px-3 py-1 rounded-lg text-sm hover:scale-[1.02] transition-all border border-border text-textSecondary hover:text-textPrimary"
-              >
-                Clear
-              </button>
+            <button
+              type="button"
+              onClick={() => setClearZonesSignal((previous) => previous + 1)}
+              className="glass-card px-3 py-1 rounded-lg text-sm hover:scale-[1.02] transition-all border border-border text-textSecondary hover:text-textPrimary"
+            >
+              Clear
+            </button>
+          </div>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setShowZones((previous) => {
-                    const next = !previous;
-                    if (!next) setDrawZones(false);
-                    return next;
-                  });
-                }}
-                className={`glass-card px-3 py-1 rounded-lg text-sm hover:scale-[1.02] transition-all border ${
-                  showZones
-                    ? "border-teal-400/70 bg-teal-500/10 text-white"
-                    : "border-border text-textSecondary hover:text-textPrimary"
-                }`}
-              >
-                Toggle Zones
-              </button>
-            </div>
-
-            <div className="relative aspect-video max-h-[520px] w-full">
+          <div className="flex-1 min-h-0 w-full overflow-hidden flex items-start">
+            <div className="relative w-full aspect-video max-h-full">
               <CameraFeed moduleType={activeModule} />
 
               <div className="absolute inset-0 z-10">
                 <ZoneEditor
-                  visible={showZones}
+                  visible={true}
                   drawModeExternal={drawZones}
                   onDrawModeChange={setDrawZones}
                   clearSignal={clearZonesSignal}
@@ -157,11 +133,13 @@ export default function Monitor() {
             </div>
           </div>
         </div>
+      </div>
 
-        <div className="col-span-12 xl:col-span-4 flex flex-col gap-4">
-          <SystemStatus activeModule={activeModule} />
-          <AlertsPanel compact />
-        </div>
+      {/* Right column: Source selector + System status + Alerts */}
+      <div className="col-span-12 xl:col-span-4 flex flex-col gap-4">
+        <SourceSelector moduleType={activeModule} />
+        <SystemStatus activeModule={activeModule} />
+        <AlertsPanel compact />
       </div>
     </div>
   );

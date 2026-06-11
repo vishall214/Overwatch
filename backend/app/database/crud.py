@@ -416,3 +416,9 @@ def create_user(db: Session, email: str, password_hash: str) -> User:
     db.commit()
     db.refresh(user)
     return user
+
+
+def get_all_user_emails(db: Session) -> list[str]:
+    """Return email addresses of all registered users."""
+    rows = db.query(User.email).all()
+    return [row[0] for row in rows if row[0]]

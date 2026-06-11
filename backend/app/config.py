@@ -117,7 +117,7 @@ class Settings(BaseSettings):
     report_scheduler_poll_seconds: int = Field(default=30, ge=5, le=300)
     report_daily_time_utc: str = "23:55"  # HH:MM format
     report_weekly_day_utc: int = Field(default=0, ge=0, le=6)  # Monday=0
-    report_email_enabled: bool = False
+    report_email_enabled: bool = True
     report_email_recipients: list[str] = []
     smtp_host: str = ""
     smtp_port: int = Field(default=587, ge=1, le=65535)

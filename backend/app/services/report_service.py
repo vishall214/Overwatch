@@ -18,6 +18,7 @@ from app.config import Settings
 from app.database.crud import (
     get_alert_summary,
     get_alerts_over_time,
+    get_all_user_emails,
     get_event_distribution,
     get_threat_metrics,
 )
@@ -218,10 +219,28 @@ class ReportService:
                 writer.writerow({key: event.get(key, "") for key in columns})
 
     def _send_report_email(self, payload: dict, json_path: Path, csv_path: Path) -> bool:
-        """Send generated report attachments over SMTP when configured."""
-        recipients = [entry.strip() for entry in self._settings.report_email_recipients if entry.strip()]
+        """Send generated report attachments over SMTP when configured.
+
+        Recipients are built from two sources:
+        1. Static list in config (report_email_recipients)
+        2. All registered user emails pulled from the database
+        """
+        # Start with static config recipients
+        recipients = {entry.strip() for entry in self._settings.report_email_recipients if entry.strip()}
+
+        # Add all registered user emails from the database
+        try:
+            db = SessionLocal()
+            try:
+                user_emails = get_all_user_emails(db)
+                recipients.update(user_emails)
+            finally:
+                db.close()
+        except Exception:
+            logger.exception("Failed to fetch user emails for report delivery")
+
         if not recipients:
-            logger.warning("Report email enabled but no recipients configured")
+            logger.warning("Report email enabled but no recipients found (config + DB)")
             return False
 
         if not self._settings.smtp_host or not self._settings.smtp_from:
@@ -234,7 +253,7 @@ class ReportService:
         message = EmailMessage()
         message["Subject"] = subject
         message["From"] = self._settings.smtp_from
-        message["To"] = ", ".join(recipients)
+        message["To"] = ", ".join(sorted(recipients))
         message.set_content(
             "\n".join(
                 [

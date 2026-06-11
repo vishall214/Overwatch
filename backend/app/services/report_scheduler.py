@@ -9,6 +9,8 @@ import threading
 from datetime import date, datetime, timezone
 
 from app.config import Settings
+from app.database.crud import get_all_user_emails
+from app.database.database import SessionLocal
 from app.services.report_service import ReportService
 
 logger = logging.getLogger(__name__)
@@ -68,10 +70,21 @@ class ReportScheduler:
             "last_daily_date": self._last_daily_date.isoformat() if self._last_daily_date else "",
             "last_weekly_key": self._last_weekly_key or "",
             "email_enabled": bool(self._settings.report_email_enabled),
-            "email_recipients_count": len(
-                [entry for entry in self._settings.report_email_recipients if entry.strip()]
-            ),
+            "email_recipients_count": self._count_email_recipients(),
         }
+
+    def _count_email_recipients(self) -> int:
+        """Count unique email recipients from config + registered users."""
+        recipients = {e.strip() for e in self._settings.report_email_recipients if e.strip()}
+        try:
+            db = SessionLocal()
+            try:
+                recipients.update(get_all_user_emails(db))
+            finally:
+                db.close()
+        except Exception:
+            logger.exception("Failed to count user emails for scheduler status")
+        return len(recipients)
 
     def _run_loop(self) -> None:
         """Scheduler worker loop."""
