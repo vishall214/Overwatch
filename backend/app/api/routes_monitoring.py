@@ -14,7 +14,8 @@ import os
 import re
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
+from app.services.storage_s3 import s3
 
 from app.config import get_settings
 
@@ -44,6 +45,13 @@ async def get_snapshot(filename: str) -> FileResponse:
         raise HTTPException(status_code=400, detail="Invalid filename")
 
     settings = get_settings()
+    # If using S3, stream the object from S3 instead of reading from disk
+    if settings.use_s3 and s3.enabled:
+        data = s3.download_to_bytes(filename)
+        if data is None:
+            raise HTTPException(status_code=404, detail="Snapshot not found")
+        return Response(content=data, media_type="image/jpeg")
+
     filepath = os.path.join(settings.snapshots_dir, filename)
 
     # Resolve to prevent directory traversal

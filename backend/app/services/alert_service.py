@@ -16,6 +16,9 @@ from typing import Any, Optional
 
 import cv2
 import numpy as np
+import io
+
+from app.services.storage_s3 import s3
 
 from app.config import Settings
 from app.database.database import SessionLocal
@@ -213,6 +216,24 @@ class AlertService:
         filepath = os.path.join(self._settings.snapshots_dir, filename)
 
         try:
+            # If S3 is enabled, upload encoded bytes instead of writing to local disk.
+            if self._settings.use_s3 and s3.enabled:
+                ok, encoded = cv2.imencode(".jpg", frame)
+                if not ok:
+                    logger.error("OpenCV failed to encode snapshot for S3: %s", filename)
+                    return ""
+
+                bio = io.BytesIO(encoded.tobytes())
+                key = filename
+                uploaded = s3.upload_fileobj(bio, key, content_type="image/jpeg")
+                if uploaded:
+                    logger.debug("Snapshot uploaded to S3: %s/%s", s3.bucket, key)
+                    return filename
+                else:
+                    logger.error("Failed to upload snapshot to S3: %s", filename)
+                    return ""
+
+            # Local disk path (default)
             saved = cv2.imwrite(filepath, frame)
             if not saved:
                 logger.error("OpenCV failed to encode snapshot: %s", filepath)

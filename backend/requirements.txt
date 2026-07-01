@@ -26,3 +26,5 @@ email-validator>=2.2,<3.0
 
 # ── PHASE 5: Database (Postgres — optional, falls back to SQLite) ──────────────
 psycopg2-binary>=2.9,<3.0
+gunicorn>=22.1.0
+boto3>=1.28.0

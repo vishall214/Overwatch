@@ -126,6 +126,14 @@ class Settings(BaseSettings):
     smtp_from: str = ""
     smtp_use_tls: bool = True
 
+    # ── Object Storage (S3-compatible) ─────────────────────────────────
+    use_s3: bool = False
+    s3_bucket: str = ""
+    s3_region: str = "us-east-1"
+    s3_access_key_id: str = ""
+    s3_secret_access_key: str = ""
+    s3_endpoint_url: Optional[str] = None  # e.g., for minio or DigitalOcean
+
     model_config = {
         "env_prefix": "OVERWATCH_",
         "env_file": ".env",
