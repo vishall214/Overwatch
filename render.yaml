@@ -1,0 +1,32 @@
+# Render Blueprint — OVERWATCH Backend
+# https://render.com/docs/blueprint-spec
+#
+# Usage:
+#   1. Push this repo to GitHub
+#   2. Go to https://dashboard.render.com/blueprints → New Blueprint Instance
+#   3. Connect your repo (vishall214/overwatch)
+#   4. Render reads this file and creates the service automatically
+#   5. Add environment variables in the Render dashboard (see below)
+
+services:
+  - type: web
+    name: overwatch-backend
+    runtime: docker
+    repo: https://github.com/vishall214/overwatch.git
+    branch: main
+    rootDir: backend
+    plan: free
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: "10000"
+      - key: DATABASE_URL
+        sync: false          # Set manually in Render dashboard
+      - key: OVERWATCH_SECRET_KEY
+        generateValue: true  # Render auto-generates a secure random value
+      - key: OVERWATCH_DEBUG
+        value: "false"
+      - key: OVERWATCH_CORS_ORIGINS
+        sync: false          # Set to your Vercel domain, e.g. ["https://overwatch.vercel.app"]
+      - key: OVERWATCH_DETECTION_DEVICE
+        value: "cpu"
