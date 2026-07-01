@@ -1,0 +1,17 @@
+.git/
+.github/
+.venv/
+frontend/node_modules/
+frontend/dist/
+data/
+research-context.tex
+research_master_content.tex
+OVERWATCH_VIVA_PREP.md
+*.md
+backend/.venv/
+backend/.env
+backend/__pycache__/
+backend/.pytest_cache/
+backend/storage/
+backend/uploads/
+backend/overwatch.db

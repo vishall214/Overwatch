@@ -14,7 +14,6 @@ services:
     runtime: docker
     repo: https://github.com/vishall214/overwatch.git
     branch: main
-    rootDir: backend
     plan: free
     autoDeploy: true
     envVars:
